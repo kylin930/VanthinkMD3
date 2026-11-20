@@ -39,7 +39,7 @@ local function openDetail(item, onRead)
       color = colors.onSurface,
       width = "match",
     }),
-  }, { marginHorizontal = 16, padding = 18 }))
+  }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
   shell.add(kit.spacer(24))
 
   return {
@@ -90,7 +90,12 @@ function M.create()
   shell.add(kit.row({
     subtitleLabel,
     kit.column({}, { width = "0dp", weight = 1 }),
-  }, { width = "match", paddingStart = 20, paddingEnd = 20, paddingBottom = 8 }))
+  }, {
+    width = "match",
+    paddingStart = kit.SPACING.pageHorizontal,
+    paddingEnd = kit.SPACING.pageHorizontal,
+    paddingBottom = 8,
+  }))
   shell.add(kit.spacer(4))
   shell.add(body)
 
@@ -136,8 +141,9 @@ function M.create()
     end
 
     return kit.card(children, {
-      marginHorizontal = 16,
-      marginTop = 8,
+      marginHorizontal = kit.SPACING.pageHorizontal,
+      marginTop = kit.SPACING.cardGap,
+      marginBottom = 0,
       background = unread and colors.surfaceContainerHigh or colors.surfaceContainerLow,
       onClick = function()
         router.push(openDetail(item, function()

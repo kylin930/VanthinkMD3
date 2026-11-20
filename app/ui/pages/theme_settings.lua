@@ -71,7 +71,8 @@ function M.create()
     shell.add(kit.text("跟随系统会使用 Android 的深浅色设置", {
       size = kit.TYPOGRAPHY.label,
       color = colors.onSurfaceVariant,
-      marginStart = 20,
+      marginStart = kit.SPACING.pageHorizontal,
+      marginEnd = kit.SPACING.pageHorizontal,
       marginBottom = 8,
     }))
     shell.add(segment("dark", theme.mode(), {
@@ -86,7 +87,8 @@ function M.create()
     shell.add(kit.text("Android 12 及以上支持根据壁纸生成整套 MD3 配色", {
       size = kit.TYPOGRAPHY.label,
       color = colors.onSurfaceVariant,
-      marginStart = 20,
+      marginStart = kit.SPACING.pageHorizontal,
+      marginEnd = kit.SPACING.pageHorizontal,
       marginBottom = 8,
       maxLines = 3,
     }))
@@ -147,6 +149,7 @@ function M.create()
     end
     rowHolder.addView(wrap)
     shell.add(rowHolder)
+    shell.add(kit.spacer(4))
 
     shell.add(kit.sectionTitle("自定义主题色"))
     local colorInput = kit.textInput({
@@ -194,7 +197,7 @@ function M.create()
             marginStart = 12,
           }),
       }, { width = "match" }),
-    }, { marginHorizontal = 16, padding = 16 }))
+    }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
     shell.add(kit.spacer(24))
   end
 

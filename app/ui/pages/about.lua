@@ -34,7 +34,7 @@ function M.create()
       size = kit.TYPOGRAPHY.label,
       color = colors.onSurfaceVariant,
     }),
-  }, { marginHorizontal = 16, padding = 18 }))
+  }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
 
   shell.add(kit.sectionTitle("技术说明"))
   shell.add(kit.card({
@@ -43,7 +43,7 @@ function M.create()
       .. "（Material Components 3），不含 WebView、HTML/CSS/JS 前端框架。"
       .. "网络请求通过 OkHttp 在后台线程执行，图标与图表由原生 Canvas 绘制。",
       { size = kit.TYPOGRAPHY.body, color = colors.onSurface, width = "match" }),
-  }, { marginHorizontal = 16, padding = 16 }))
+  }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
 
   shell.add(kit.sectionTitle("数据来源"))
   shell.add(kit.card({
@@ -62,7 +62,7 @@ function M.create()
       "Auth 迁移与版本说明使用原项目沿用的第三方中转服务（" .. config.THIRD_PARTY.sourceHost
       .. "），属于可选能力；不可用时不影响作业、通知、统计功能。",
       { size = kit.TYPOGRAPHY.label, color = colors.onSurfaceVariant, width = "match" }),
-  }, { marginHorizontal = 16, padding = 16 }))
+  }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
 
   shell.add(kit.sectionTitle("开源与致谢"))
   shell.add(kit.card({
@@ -70,7 +70,7 @@ function M.create()
       "感谢原 Web 版本（Vanthink WebMDUI2）提供的功能原型。"
       .. "本应用为独立重写实现，采用 Material Design 3 设计语言重新设计了信息架构与交互。",
       { size = kit.TYPOGRAPHY.body, color = colors.onSurface, width = "match" }),
-  }, { marginHorizontal = 16, padding = 16 }))
+  }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
 
   shell.add(kit.spacer(24))
   return { key = "about", view = sub.root }

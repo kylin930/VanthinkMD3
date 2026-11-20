@@ -21,7 +21,7 @@ local function block(title, body, colors)
       color = colors.onSurfaceVariant,
       width = "match",
     }),
-  }, { marginHorizontal = 16, marginTop = 8, padding = 16 })
+  }, { marginHorizontal = kit.SPACING.pageHorizontal, marginTop = kit.SPACING.cardGap, padding = kit.SPACING.cardPadding })
 end
 
 function M.create()

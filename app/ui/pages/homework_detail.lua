@@ -250,9 +250,8 @@ function M.create(homework)
           kit.text("题目数", { size = kit.TYPOGRAPHY.label, color = colors.onSurfaceVariant }),
         }, { width = "0dp", weight = 1 }),
       }, { width = "match" }),
-    }, { marginHorizontal = 16, padding = 18 }))
+    }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
 
-    shell.add(kit.spacer(8))
     shell.add(kit.sectionTitle("练习列表", "分享作业", function()
       page.share()
     end))
@@ -277,13 +276,22 @@ function M.create(homework)
           listChildren[#listChildren + 1] = kit.divider()
         end
       end
-      shell.add(kit.card(listChildren, { marginHorizontal = 16, padding = 0 }))
+      shell.add(kit.card(listChildren, {
+        marginHorizontal = kit.SPACING.pageHorizontal,
+        padding = 0,
+      }))
     end
 
     shell.add(kit.spacer(16))
     shell.add(kit.text(
       "提示：练习完成记录只会按你输入的实际情况提交，应用不会代替你答题，也不会生成虚假成绩。",
-      { size = kit.TYPOGRAPHY.label, color = colors.outline, maxLines = 5 }))
+      {
+        size = kit.TYPOGRAPHY.label,
+        color = colors.outline,
+        maxLines = 5,
+        marginStart = kit.SPACING.pageHorizontal,
+        marginEnd = kit.SPACING.pageHorizontal,
+      }))
     shell.add(kit.spacer(24))
   end
 

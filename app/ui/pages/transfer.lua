@@ -108,7 +108,7 @@ function M.openSenderFlow()
         width = "match",
         maxLines = 2,
       }),
-    }, { marginHorizontal = 16, padding = 18 }))
+    }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
 
     shell.add(kit.row({
       kit.button("刷新二维码", {
@@ -154,7 +154,7 @@ function M.openSenderFlow()
         .. "请只在自己的设备上扫描，用完请立即关闭页面。链接由第三方服务生成，"
         .. "服务端会记录生成与领取行为。",
         { size = kit.TYPOGRAPHY.label, color = colors.onSurfaceVariant, width = "match" }),
-    }, { marginHorizontal = 16, padding = 16 }))
+    }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
     shell.add(kit.spacer(24))
   end
 

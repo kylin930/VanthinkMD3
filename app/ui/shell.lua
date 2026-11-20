@@ -25,13 +25,42 @@ M.backCallbackAdded = false
 M.authInvalidHandling = false
 
 local TAB_ITEMS = {
-  { key = "homework", label = "作业", icon = "assignment" },
-  { key = "notifications", label = "通知", icon = "notifications" },
-  { key = "statistics", label = "统计", icon = "insights" },
-  { key = "profile", label = "我的", icon = "person" },
+  -- icon = 选中态（填充），iconOutline = 未选中态（描边）
+  { key = "homework", label = "作业", icon = "assignment", iconOutline = "assignment_outline" },
+  { key = "notifications", label = "通知", icon = "notifications", iconOutline = "notifications_outline" },
+  { key = "statistics", label = "统计", icon = "insights", iconOutline = "insights_outline" },
+  { key = "profile", label = "我的", icon = "person", iconOutline = "person_outline" },
 }
 
 local TAB_IDS = {}
+local TAB_INDEX = {}
+
+for index, item in ipairs(TAB_ITEMS) do
+  TAB_INDEX[item.key] = index
+end
+
+-- 选中/未选中图标切换：
+-- BottomNavigationView 原生只做着色（itemIconTint 按 state），无法切换成套图标，
+-- 因此这里在选中项变化时同步替换 menu item 的图标（填充 ↔ 描边）。
+-- 两套图标同为 24×24 逻辑网格、同样按 24dp 栅格化，切换时不会出现尺寸跳动；
+-- Indicator、标签显隐与选中动画仍由 BottomNavigationView 原生逻辑负责。
+local function applyTabIcons(nav, colors, selectedId)
+  local iconModule = require "app.ui.icons"
+  local okMenu, menu = pcall(function() return nav.getMenu() end)
+  if not okMenu or menu == nil then return end
+  for index, tab in ipairs(TAB_ITEMS) do
+    local okItem, menuItem = pcall(function() return menu.findItem(index) end)
+    if okItem and menuItem ~= nil then
+      local checked = selectedId ~= nil and selectedId == index
+      local name = checked and tab.icon or tab.iconOutline
+      local tint = checked and colors.onSecondaryContainer or colors.onSurfaceVariant
+      local okDrawable, drawable = pcall(function() return iconModule.get(name, 24, tint) end)
+      if okDrawable and drawable ~= nil then
+        pcall(function() menuItem.setIcon(drawable) end)
+      end
+    end
+  end
+end
 
 local function buildBottomNav(colors)
   -- 底部导航：宽度占满、高度自适应。用 BottomNavigationView 自身的
@@ -50,7 +79,8 @@ local function buildBottomNav(colors)
     local menuItem = menu.add(0, index, index - 1, item.label)
     TAB_IDS[index] = item.key
     pcall(function()
-      local drawable = require "app.ui.icons".get(item.icon, 22, colors.onSurfaceVariant)
+      -- 初始一律描边：首个页面由 showTab 选中，选中后 applyTabIcons 再换成填充
+      local drawable = require "app.ui.icons".get(item.iconOutline, 24, colors.onSurfaceVariant)
       if drawable ~= nil then menuItem.setIcon(drawable) end
     end)
   end
@@ -61,10 +91,22 @@ local function buildBottomNav(colors)
     if key == nil then return false end
     if M.mode ~= "main" then return true end
     router.showTab(key)
+    applyTabIcons(nav, colors, index)
     return true
   end)
 
+  applyTabIcons(nav, colors, nil)
   return nav
+end
+
+-- 供路由在「代码侧」切页（登录后复位、返回键回首页）后同步图标状态。
+-- 通过 nav.setSelectedItemId 切换会由上面的 listener 处理，这里只补图标，
+-- 不改选中项，避免与 BottomNavigationView 自身的选择逻辑打架。
+function M.syncTabIcons(key)
+  if M.bottomNav == nil then return end
+  local index = TAB_INDEX[key]
+  if index == nil then return end
+  applyTabIcons(M.bottomNav, theme.colors(), index)
 end
 
 -- 系统栏适配说明：
@@ -190,6 +232,11 @@ function M.showMain()
   router.registerTab("profile", function()
     return require "app.ui.pages.profile".create()
   end)
+
+  -- 路由侧切页（登录后复位、返回键回首页）后同步底部导航图标状态
+  router.onTabChanged = function(key)
+    M.syncTabIcons(key)
+  end
 
   -- 顺序很重要：LinearLayout 的 weight 只作用于声明了 weight 的子视图，
   -- 底部导航保持 wrap_content，内容区吃掉剩余高度。

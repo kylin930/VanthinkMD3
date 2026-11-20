@@ -85,7 +85,7 @@ function M.create()
           }),
         }, { width = "0dp", weight = 1, marginStart = 16 }),
       }, { width = "match" }),
-    }, { marginHorizontal = 16, padding = 18 }))
+    }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
 
     -- 账号
     shell.add(kit.sectionTitle("账号"))
@@ -168,8 +168,8 @@ function M.create()
       }),
     }))
 
-    -- 退出登录
-    shell.add(kit.spacer(16))
+    -- 退出登录：与上方分组卡片保持 20dp 层次间距
+    shell.add(kit.spacer(20))
     shell.add(kit.row({
       kit.button("退出登录", {
         width = "match",
@@ -177,8 +177,12 @@ function M.create()
         style = "outlined",
         onClick = function() page.logout() end,
       }),
-    }, { width = "match", paddingStart = 16, paddingEnd = 16 }))
-    shell.add(kit.spacer(28))
+    }, {
+      width = "match",
+      paddingStart = kit.SPACING.pageHorizontal,
+      paddingEnd = kit.SPACING.pageHorizontal,
+    }))
+    shell.add(kit.spacer(24))
   end
 
   function page.refreshAccount()

@@ -96,9 +96,9 @@ local function buildCard(item, colors, onOpen)
   end
 
   return kit.card(children, {
-    marginHorizontal = 16,
-    marginTop = 8,
-    marginBottom = 4,
+    marginHorizontal = kit.SPACING.pageHorizontal,
+    marginTop = kit.SPACING.cardGap,
+    marginBottom = 0,
     onClick = function() onOpen(item) end,
   })
 end
@@ -234,7 +234,12 @@ function M.create()
   shell.add(kit.row({
     accountLabel,
     kit.column({}, { width = "0dp", weight = 1 }),
-  }, { width = "match", paddingStart = 20, paddingEnd = 20, paddingBottom = 8 }))
+  }, {
+    width = "match",
+    paddingStart = kit.SPACING.pageHorizontal,
+    paddingEnd = kit.SPACING.pageHorizontal,
+    paddingBottom = 8,
+  }))
   shell.add(kit.card({
     kit.text("当前筛选结果", { size = kit.TYPOGRAPHY.label, color = colors.onSurfaceVariant }),
     kit.spacer(8),
@@ -243,8 +248,8 @@ function M.create()
       kit.column({}, { width = "0dp", weight = 1 }),
       summaryLoaded,
     }, { width = "match" }),
-  }, { marginHorizontal = 16, padding = 16 }))
-  shell.add(kit.spacer(10))
+  }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
+  shell.add(kit.spacer(kit.SPACING.cardGap))
   shell.add(filterScroll)
   shell.add(kit.spacer(4))
   shell.add(body)

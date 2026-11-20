@@ -3,6 +3,7 @@
 
 local theme = require "app.ui.theme"
 local logger = require "app.utils.logger"
+local motion = require "app.ui.motion"
 
 local M = {}
 
@@ -17,6 +18,9 @@ M.stack = {}
 M.tabs = {}
 M.tabCache = {}
 M.onTabChanged = nil
+-- 转场开关：默认开启；首次显示（容器内还没有任何页面）本来就不会播动画，
+-- 需要瞬时切换的场景（如登录态复位）可以显式传 { instant = true }
+M.animationsEnabled = true
 
 function M.init(container)
   M.container = container
@@ -63,16 +67,28 @@ function M.registerTab(key, factory)
   M.tabs[key] = factory
 end
 
-function M.showTab(key)
+-- 顶级页面切换：MaterialFadeThrough（旧页淡出 + 新页淡入并轻微放大）。
+-- 视图交换（detachAll + attachView）放在转场回调里执行：
+-- TransitionManager 会在同一帧内对比变更前后，从而对旧视图播放退出、
+-- 对新视图播放进入动画。
+-- 首次显示（之前没有页面）与 { instant = true } 不播动画，直接交换。
+function M.showTab(key, opts)
   if M.container == nil then return end
   if M.currentKey == key and #M.stack == 0 then return end
+  local o = opts or {}
+
+  -- 弹栈：先把压栈页面全部关闭并通知生命周期
   while #M.stack > 0 do
     local entry = table.remove(M.stack)
     if type(entry.page) == "table" and entry.page.onHide then
       pcall(entry.page.onHide)
     end
   end
-  leaveCurrent()
+
+  local previous = M.current
+  if type(previous) == "table" and previous.onHide then pcall(previous.onHide) end
+  M.current = nil
+  M.currentKey = nil
 
   -- 主页页面实例按 key 缓存复用。
   -- 每次切 tab 都 factory() 重建整页会让页面从零开始构建（先空态、再加载态、
@@ -87,9 +103,21 @@ function M.showTab(key)
     page = factory()
     M.tabCache[key] = page
   end
+
+  local function swap()
+    detachAll()
+    attachView(page.view)
+  end
+
+  local animated = false
+  if M.animationsEnabled and not o.instant and previous ~= nil
+    and type(previous) == "table" and previous.view ~= nil then
+    animated = motion.fadeThrough(M.container, swap)
+  end
+  if not animated then swap() end
+
   M.current = page
   M.currentKey = key
-  attachView(page.view)
   if page.onShow then pcall(page.onShow) end
   if M.onTabChanged then pcall(M.onTabChanged, key) end
   return page
@@ -101,16 +129,29 @@ function M.clearTabCache()
 end
 
 -- 压栈打开二级页；返回 page
-function M.push(page)
+-- 转场：MaterialSharedAxis X（forward = true，页面向前推进）
+function M.push(page, opts)
+  local o = opts or {}
   if M.container == nil or page == nil then return end
-  if M.current ~= nil then
-    M.stack[#M.stack + 1] = { key = M.currentKey, page = M.current }
-    detachAll()
-    if M.current.onPause then pcall(M.current.onPause) end
+  local previous = M.current
+  if previous ~= nil then
+    M.stack[#M.stack + 1] = { key = M.currentKey, page = previous }
+    if previous.onPause then pcall(previous.onPause) end
   end
+
+  local function swap()
+    detachAll()
+    attachView(page.view)
+  end
+
+  local animated = false
+  if M.animationsEnabled and not o.instant and previous ~= nil and previous.view ~= nil then
+    animated = motion.sharedAxis(M.container, { forward = true }, swap)
+  end
+  if not animated then swap() end
+
   M.current = page
   M.currentKey = page.key
-  attachView(page.view)
   if page.onShow then pcall(page.onShow) end
   return page
 end
@@ -120,22 +161,34 @@ function M.canGoBack()
 end
 
 -- 返回上一层；返回 true 表示已处理
-function M.back()
+-- 转场：MaterialSharedAxis X（forward = false，页面反向退出）
+function M.back(opts)
+  local o = opts or {}
   if #M.stack == 0 then return false end
   local current = M.current
   if current ~= nil and current.onHide then pcall(current.onHide) end
-  detachAll()
+
   local entry = table.remove(M.stack)
+  local function swap()
+    detachAll()
+    attachView(entry.page.view)
+  end
+
+  local animated = false
+  if M.animationsEnabled and not o.instant and current ~= nil and current.view ~= nil then
+    animated = motion.sharedAxis(M.container, { forward = false }, swap)
+  end
+  if not animated then swap() end
+
   M.current = entry.page
   M.currentKey = entry.key
-  attachView(entry.page.view)
   if entry.page.onResume then pcall(entry.page.onResume) end
   if M.onTabChanged then pcall(M.onTabChanged, M.currentKey) end
   return true
 end
 
 -- 回到指定主页并清空栈
-function M.reset(key)
+function M.reset(key, opts)
   while #M.stack > 0 do
     local entry = table.remove(M.stack)
     if type(entry.page) == "table" and entry.page.onHide then
@@ -143,7 +196,7 @@ function M.reset(key)
     end
   end
   leaveCurrent()
-  M.showTab(key)
+  M.showTab(key, opts)
 end
 
 -- 二级页通用外壳：顶部返回栏 + 内容区

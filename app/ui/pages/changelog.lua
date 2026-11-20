@@ -28,7 +28,11 @@ local function listCard(title, items, colors, accentBackground, accentColor)
     }, { width = "match", gravity = "top" })
     children[#children + 1] = kit.spacer(6)
   end
-  return kit.card(children, { marginHorizontal = 16, marginTop = 8, padding = 16 })
+  return kit.card(children, {
+    marginHorizontal = kit.SPACING.pageHorizontal,
+    marginTop = kit.SPACING.cardGap,
+    padding = kit.SPACING.cardPadding,
+  })
 end
 
 function M.renderChangelog(shell, data)
@@ -46,7 +50,7 @@ function M.renderChangelog(shell, data)
       size = kit.TYPOGRAPHY.label,
       color = colors.onSurfaceVariant,
     }),
-  }, { marginHorizontal = 16, padding = 18 }))
+  }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
 
   local added = listCard("新增", data.added or {}, colors,
     colors.primaryContainer, colors.onPrimaryContainer)
@@ -71,7 +75,11 @@ function M.renderChangelog(shell, data)
         color = colors.onSurface,
         width = "match",
       }),
-    }, { marginHorizontal = 16, marginTop = 8, padding = 16 }))
+    }, {
+      marginHorizontal = kit.SPACING.pageHorizontal,
+      marginTop = kit.SPACING.cardGap,
+      padding = kit.SPACING.cardPadding,
+    }))
   end
   shell.add(kit.spacer(24))
 end

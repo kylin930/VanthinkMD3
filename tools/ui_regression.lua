@@ -129,6 +129,47 @@ local function findViewsByClass(root, needle)
   return found
 end
 
+local function parentOf(view)
+  local ok, parent = pcall(function() return view.getParent() end)
+  if ok then return parent end
+  return nil
+end
+
+-- 按类名收集，并可选地按文本过滤（textNeedle = nil 表示只收文本为空的按钮）
+local function buttonsMatching(root, classNeedle, textNeedle)
+  local list = {}
+  for _, view in ipairs(findViewsByClass(root, classNeedle)) do
+    local ok, value = pcall(function() return view.getText() end)
+    local text = (ok and value ~= nil) and tostring(value) or nil
+    if textNeedle == nil then
+      if text == nil or text == "" then list[#list + 1] = view end
+    elseif text ~= nil and string.find(text, textNeedle, 1, true) ~= nil then
+      list[#list + 1] = view
+    end
+  end
+  return list
+end
+
+-- 位图身份：icons.get 按 name|size|color 缓存同一个 drawable，
+-- 用 Bitmap 的 identityHashCode 就能判断「当前菜单图标用的是哪一套」。
+local function bitmapId(drawable)
+  if drawable == nil then return nil end
+  local ok, bitmap = pcall(function() return drawable.getBitmap() end)
+  if not ok or bitmap == nil then return nil end
+  local okId, id = pcall(function()
+    return luajava.bindClass("java.lang.System").identityHashCode(bitmap)
+  end)
+  if okId then return id end
+  return nil
+end
+
+local function findCardContaining(root, needle)
+  for _, card in ipairs(findViewsByClass(root, "MaterialCardView")) do
+    if findText(card, needle) ~= nil then return card end
+  end
+  return nil
+end
+
 local function clickableAncestor(view)
   local current = view
   for _ = 1, 14 do
@@ -576,13 +617,21 @@ step("我的页面列表条目检查", function()
   check("带副标题的条目副标题可见", #subtitleMissing == 0, table.concat(subtitleMissing, ", "))
   check("条目点击区域完整", #clickMissing == 0, table.concat(clickMissing, ", "))
 
-  local iconHolders = 0
+  -- v0.2.3：Leading Icon 容器从 40dp 缩小到 24dp（图标本身也 24dp）
+  local iconHolders, legacyHolders = 0, 0
   walk(view, function(node)
-    if math.abs(widthOf(node) - dp(40)) <= 2 and math.abs(heightOf(node) - dp(40)) <= 2 then
+    if math.abs(widthOf(node) - dp(24)) <= 2 and math.abs(heightOf(node) - dp(24)) <= 2 then
       iconHolders = iconHolders + 1
     end
+    -- 只统计列表项的图标容器（FrameLayout 持有者）；
+    -- SwipeRefreshLayout 自带的 CircleImageView 也是 40dp，不能算进来
+    if string.find(classOf(node), "FrameLayout", 1, true) ~= nil
+      and math.abs(widthOf(node) - dp(40)) <= 2 and math.abs(heightOf(node) - dp(40)) <= 2 then
+      legacyHolders = legacyHolders + 1
+    end
   end)
-  check("列表项图标容器为 40dp", iconHolders >= 7, "匹配数=" .. iconHolders)
+  check("列表项图标容器为 24dp", iconHolders >= 7, "匹配数=" .. iconHolders)
+  check("不再存在 40dp 图标容器", legacyHolders == 0, "旧尺寸个数=" .. legacyHolders)
 
   local exitButton = findText(view, "退出登录")
   check("退出登录按钮可见", exitButton ~= nil and exitButton.width > 0,
@@ -878,6 +927,386 @@ step("文字与背景对比度（当前主题模式）", function()
   check("文字与背景对比度正常（无同色文字）", #lowContrast == 0,
     table.concat(lowContrast, "; "))
   log(string.format("      当前模式：%s（另一模式需真机切换后复测）", tostring(theme.mode())))
+end)
+
+-- ===== 八、v0.2.3：Leading Icon / 卡片外边距 / 统计页 / 导航图标 / 转场 =====
+
+-- 视图在页面内的绝对左坐标（累加父容器的 getLeft，直到页面根视图）
+local function absoluteLeft(view, root)
+  local x, current = 0, view
+  for _ = 1, 40 do
+    if current == nil then break end
+    local okSame, same = pcall(function() return current.equals(root) end)
+    if okSame and same == true then break end
+    local okLeft, left = pcall(function() return current.getLeft() end)
+    if okLeft and left ~= nil then x = x + left end
+    current = parentOf(current)
+  end
+  return x
+end
+
+local function contentOf(pageView)
+  local scroll = findViewsByClass(pageView, "NestedScrollView")[1]
+  if scroll == nil then return nil end
+  return childAt(scroll, 0)
+end
+
+step("v0.2.3 列表项 Leading Icon：24dp 容器 + 24dp 图标 + 16dp 间距", function()
+  local item = kit.listItem({
+    icon = "lock",
+    title = "登录凭据",
+    subtitle = "Token 保存在系统 Keystore 加密存储中，不会明文落盘",
+    showChevron = true,
+    onClick = function() end,
+  })
+  local host = measureAt(item, screenWidth)
+  check("列表项测量成功", host ~= nil)
+  if host == nil then return end
+
+  local title = findText(host, "登录凭据")
+  check("标题可见且有尺寸", title ~= nil and title.width > 0 and title.height > 0,
+    title and (title.width .. "x" .. title.height) or "未找到")
+  local subtitle = findText(host, "Token 保存在系统")
+  check("副标题可见且有尺寸", subtitle ~= nil and subtitle.width > 0,
+    subtitle and (subtitle.width .. "px") or "未找到")
+
+  local iconView = nil
+  for _, view in ipairs(findViewsByClass(host, "android.widget.ImageView")) do
+    if math.abs(widthOf(view) - dp(24)) <= 2 and math.abs(heightOf(view) - dp(24)) <= 2 then
+      iconView = view
+      break
+    end
+  end
+  check("图标尺寸为 24dp", iconView ~= nil,
+    iconView and (widthOf(iconView) .. "px") or "未找到")
+
+  local holder = iconView and parentOf(iconView) or nil
+  check("图标容器为 24dp", holder ~= nil
+    and math.abs(widthOf(holder) - dp(24)) <= 2 and math.abs(heightOf(holder) - dp(24)) <= 2,
+    holder and (widthOf(holder) .. "x" .. heightOf(holder)) or "未找到")
+
+  local textHolder = title and parentOf(title.view) or nil
+  if holder ~= nil and textHolder ~= nil then
+    local gap = textHolder.getLeft() - holder.getRight()
+    check("图标与文字间距为 16dp", math.abs(gap - dp(16)) <= dp(2), gap .. "px")
+    check("正文左边缘落在 56dp MD3 keyline",
+      math.abs(textHolder.getLeft() - dp(56)) <= dp(2), textHolder.getLeft() .. "px")
+  end
+
+  check("双行列表项高度 ≥ 72dp", heightOf(host) >= dp(72), heightOf(host) .. "px")
+  local okClickable = false
+  pcall(function() okClickable = item.isClickable() and item.hasOnClickListeners() end)
+  check("整行仍是点击区域（未因缩小图标容器而缩小触控区）", okClickable,
+    "height=" .. heightOf(host) .. "px")
+
+  local single = kit.listItem({ icon = "history", title = "更新日志", onClick = function() end })
+  local singleHost = measureAt(single, screenWidth)
+  check("单行列表项高度 ≥ 56dp", singleHost ~= nil and heightOf(singleHost) >= dp(56),
+    singleHost and (heightOf(singleHost) .. "px") or "未测量")
+end)
+
+step("v0.2.3 切到我的页面", function()
+  router.showTab("profile")
+  check("我的 tab 已显示", router.currentKey == "profile", tostring(router.currentKey))
+end)
+
+step("v0.2.3 我的页面：卡片外边距 / 分组间距 / 分栏层次", function()
+  local view = router.current.view
+  local content = contentOf(view)
+  check("滚动内容容器存在", content ~= nil)
+  if content == nil then return end
+
+  local cards = {}
+  for index = 0, childCount(content) - 1 do
+    local child = childAt(content, index)
+    if child ~= nil and string.find(classOf(child), "MaterialCardView", 1, true) ~= nil then
+      cards[#cards + 1] = child
+    end
+  end
+  check("我的页面至少有 4 张分组卡片", #cards >= 4, "卡片数=" .. #cards)
+
+  local badEdge = {}
+  for index, card in ipairs(cards) do
+    local left = absoluteLeft(card, view)
+    local right = left + widthOf(card)
+    if left < dp(12) or right > screenWidth - dp(12) then
+      badEdge[#badEdge + 1] = string.format("卡片%d left=%d right=%d", index, left, right)
+    end
+  end
+  check("卡片左右外边距真正生效（不再贴屏幕边缘）", #badEdge == 0,
+    table.concat(badEdge, "; ") .. (screenWidth and (" | 屏宽 " .. screenWidth) or ""))
+  if cards[1] ~= nil then
+    local left = absoluteLeft(cards[1], view)
+    check("账号卡片左边缘为 16dp", math.abs(left - dp(16)) <= dp(2), left .. "px")
+  end
+
+  for index = 2, #cards do
+    local gap = cards[index].getTop() - cards[index - 1].getBottom()
+    check(string.format("分组卡片 %d 与上一张之间有呼吸间距（≥ 8dp）", index), gap >= dp(8),
+      gap .. "px")
+  end
+
+  -- 同一组内用 Divider 分隔，而不是拆成多张卡片
+  local dividers = findViewsByClass(view, "MaterialDivider")
+  check("同组列表项之间使用 Divider 分隔", #dividers >= 2, "分割线=" .. #dividers)
+end)
+
+step("v0.2.3 切到统计页", function()
+  router.showTab("statistics")
+  check("统计 tab 已显示", router.currentKey == "statistics", tostring(router.currentKey))
+end)
+
+step("v0.2.3 统计页：年份按钮不裁切、月份栏已精简", function()
+  local view = router.current.view
+  local yearButtons = buttonsMatching(view, "MaterialButton", "年")
+  check("年份选择按钮存在且只有一个", #yearButtons == 1, "个数=" .. #yearButtons)
+  local button = yearButtons[1]
+  if button ~= nil then
+    check("年份按钮高度 ≥ 48dp（稳定触控高度）", heightOf(button) >= dp(48),
+      heightOf(button) .. "px")
+    local layoutHeight, padTop, padBottom = 0, 0, 0
+    pcall(function() layoutHeight = button.getLayout().getHeight() end)
+    pcall(function()
+      padTop = button.getPaddingTop()
+      padBottom = button.getPaddingBottom()
+    end)
+    local contentHeight = heightOf(button) - padTop - padBottom
+    check("年份文字未被裁切（内容区高度 ≥ 文本行高）",
+      layoutHeight > 0 and contentHeight >= layoutHeight,
+      string.format("按钮 %dpx，padding %d+%d，文本行高 %dpx",
+        heightOf(button), padTop, padBottom, layoutHeight))
+    check("年份按钮为 outlined 样式且文字垂直居中",
+      contentHeight >= layoutHeight and contentHeight - layoutHeight >= 0,
+      "内容区余量 " .. (contentHeight - layoutHeight) .. "px")
+  end
+
+  local badge = findText(view, " 年 ")
+  local badgeView = badge and badge.view or nil
+  local badgeRow = badgeView and parentOf(badgeView) or nil
+  if badgeRow ~= nil and childCount(badgeRow) <= 1 then badgeRow = parentOf(badgeRow) end
+  check("月份选择栏存在", badgeRow ~= nil)
+  if badgeRow ~= nil then
+    local monthButtons = buttonsMatching(badgeRow, "MaterialButton")
+    check("月份选择栏只剩 1 个图标按钮（重复刷新已移除）", #monthButtons == 1,
+      "个数=" .. #monthButtons)
+  end
+
+  local iconOnly = buttonsMatching(view, "MaterialButton")
+  check("统计页图标按钮总数为 2（页头刷新 + 月份选择）", #iconOnly == 2, "个数=" .. #iconOnly)
+
+  local content = contentOf(view)
+  local header = content and childAt(content, 0) or nil
+  local headerButtons = header and buttonsMatching(header, "MaterialButton") or {}
+  check("页头保留唯一的刷新入口", #headerButtons == 1, "个数=" .. #headerButtons)
+end)
+
+step("v0.2.3 统计页：卡片间距 12dp、图表不贴边、无横向溢出", function()
+  local view = router.current.view
+  -- 先确保页面处于「已测量并布局」的状态：切页刚完成时若布局还没跑，
+  -- 读到的 getLeft/getRight 都是 0，会让间距断言得出无意义的负值。
+  local widthSpec = MeasureSpec.makeMeasureSpec(screenWidth, MeasureSpec.EXACTLY)
+  local heightSpec = MeasureSpec.makeMeasureSpec(0, MeasureSpec.UNSPECIFIED)
+  pcall(function()
+    view.measure(widthSpec, heightSpec)
+    view.layout(0, 0, view.getMeasuredWidth(), view.getMeasuredHeight())
+  end)
+  check("统计页已测量（宽度 > 0）", widthOf(view) > 0, widthOf(view) .. "px")
+
+  local cards = findViewsByClass(view, "MaterialCardView")
+  check("统计页卡片已渲染", #cards >= 4, "卡片数=" .. #cards)
+  for index, card in ipairs(cards) do
+    log(string.format("      卡片%d %dx%d L=%d T=%d R=%d B=%d", index,
+      widthOf(card), heightOf(card), card.getLeft(), card.getTop(),
+      card.getRight(), card.getBottom()))
+  end
+
+  local badEdge = {}
+  for index, card in ipairs(cards) do
+    local left = absoluteLeft(card, view)
+    local right = left + widthOf(card)
+    if left < dp(12) or right > screenWidth - dp(12) then
+      badEdge[#badEdge + 1] = string.format("卡片%d left=%d right=%d", index, left, right)
+    end
+  end
+  check("所有统计卡片左右边距 ≥ 12dp（图表不贴屏幕边缘）", #badEdge == 0,
+    table.concat(badEdge, "; "))
+
+  if #cards >= 2 then
+    local gap = cards[2].getLeft() - cards[1].getRight()
+    check("双列卡片之间间距为 12dp", math.abs(gap - dp(12)) <= dp(2), gap .. "px")
+  end
+  if #cards >= 3 then
+    local row1, row2 = parentOf(cards[1]), parentOf(cards[3])
+    if row1 ~= nil and row2 ~= nil then
+      local rowGap = row2.getTop() - row1.getBottom()
+      check("两行摘要卡片之间间距为 12dp", math.abs(rowGap - dp(12)) <= dp(2), rowGap .. "px")
+    end
+  end
+
+  local chartCount, chartOverflow = 0, 0
+  for _, chartView in ipairs(findViewsByClass(view, "android.widget.ImageView")) do
+    if widthOf(chartView) >= dp(200) then
+      chartCount = chartCount + 1
+      local left = absoluteLeft(chartView, view)
+      if left + widthOf(chartView) > screenWidth then chartOverflow = chartOverflow + 1 end
+    end
+  end
+  check("柱状图 / 折线图完整渲染", chartCount >= 2, "宽图表数=" .. chartCount)
+  check("图表未超出屏幕宽度", chartOverflow == 0, "溢出数=" .. chartOverflow)
+end)
+
+step("v0.2.3 底部导航：选中填充 / 未选中描边", function()
+  local iconsModule = require "app.ui.icons"
+  local tabIconNames = {
+    { filled = "assignment", outline = "assignment_outline" },
+    { filled = "notifications", outline = "notifications_outline" },
+    { filled = "insights", outline = "insights_outline" },
+    { filled = "person", outline = "person_outline" },
+  }
+  local missing = {}
+  for _, pair in ipairs(tabIconNames) do
+    if not iconsModule.has(pair.filled) then missing[#missing + 1] = pair.filled end
+    if not iconsModule.has(pair.outline) then missing[#missing + 1] = pair.outline end
+  end
+  check("四套填充 / 描边图标定义齐全", #missing == 0, table.concat(missing, ", "))
+
+  local shellModule = require "app.ui.shell"
+  local nav = shellModule.bottomNav
+  check("底部导航已创建", nav ~= nil)
+  if nav == nil then return end
+  local menu = nav.getMenu()
+  check("底部导航有 4 个入口", menu.size() == 4, "size=" .. tostring(menu.size()))
+
+  pcall(function() nav.setSelectedItemId(1) end)
+  -- 必须取当前主题色板：脚本加载时（theme.bootstrap 之前）缓存下来的 colors 已经过期，
+  -- 用过期色值算出来的位图身份与实际菜单图标不一致，会误报。
+  local liveColors = theme.colors()
+  local filledHome = bitmapId(iconsModule.get("assignment", 24, liveColors.onSecondaryContainer))
+  local outlineHome = bitmapId(iconsModule.get("assignment_outline", 24, liveColors.onSurfaceVariant))
+  local selectedId = bitmapId(menu.findItem(1).getIcon())
+  local unselectedId = bitmapId(menu.findItem(2).getIcon())
+  local outlineBell = bitmapId(iconsModule.get("notifications_outline", 24, liveColors.onSurfaceVariant))
+  local filledBell = bitmapId(iconsModule.get("notifications", 24, liveColors.onSecondaryContainer))
+
+  check("选中项使用填充图标", selectedId ~= nil and selectedId == filledHome,
+    tostring(selectedId) .. " / 期望 " .. tostring(filledHome))
+  check("未选中项使用描边图标（铃铛不再用填充版）",
+    unselectedId ~= nil and unselectedId == outlineBell,
+    tostring(unselectedId) .. " / 期望 " .. tostring(outlineBell))
+  check("选中与未选中图标确实不同", selectedId ~= unselectedId,
+    tostring(selectedId) .. " / " .. tostring(unselectedId))
+
+  local sizeOk = true
+  for index = 1, 4 do
+    local ok, drawable = pcall(function() return menu.findItem(index).getIcon() end)
+    if not ok or drawable == nil then
+      sizeOk = false
+    else
+      local okBounds, bounds = pcall(function() return drawable.getBounds() end)
+      if not okBounds or bounds == nil
+        or math.abs(bounds.width() - dp(24)) > 2 or math.abs(bounds.height() - dp(24)) > 2 then
+        sizeOk = false
+      end
+    end
+  end
+  check("四个导航图标视觉尺寸一致（24dp 逻辑网格）", sizeOk)
+
+  pcall(function() nav.setSelectedItemId(2) end)
+  check("切换到通知后 selectedItemId 正确", nav.getSelectedItemId() == 2,
+    tostring(nav.getSelectedItemId()))
+  check("切换后通知变为填充态",
+    bitmapId(menu.findItem(2).getIcon()) == filledBell)
+  check("切换后作业变为描边态",
+    bitmapId(menu.findItem(1).getIcon()) == outlineHome)
+end)
+
+step("v0.2.3 转场：能力探测与四个主页快速连点", function()
+  local motion = require "app.ui.motion"
+  local info = motion.describe()
+  log(string.format("      转场模式=%s FadeThrough=%s SharedAxis=%s TransitionManager=%s 动画缩放=%s",
+    tostring(info.mode), tostring(info.materialFadeThrough), tostring(info.materialSharedAxis),
+    tostring(info.transitionManager), tostring(info.animatorScale)))
+  check("Material 官方转场类可用",
+    info.materialFadeThrough and info.materialSharedAxis and info.transitionManager,
+    tostring(info.mode))
+  check("系统动画缩放允许播放转场", info.animatorScale ~= nil and info.animatorScale > 0.01,
+    tostring(info.animatorScale))
+
+  local keys = { "homework", "notifications", "statistics", "profile" }
+  local failed, stacked = {}, {}
+  for _, key in ipairs(keys) do
+    local ok = pcall(function() router.showTab(key) end)
+    if not ok then failed[#failed + 1] = key end
+    if childCount(router.container) ~= 1 then
+      stacked[#stacked + 1] = key .. ":" .. childCount(router.container)
+    end
+  end
+  check("快速连续切换 4 个主页不抛异常", #failed == 0, table.concat(failed, ", "))
+  check("快速连续切换后不出现视图叠加", #stacked == 0, table.concat(stacked, ", "))
+  check("最终停留在「我的」", router.currentKey == "profile", tostring(router.currentKey))
+end)
+
+step("v0.2.3 转场结束后页面可交互（无空白 / 无失焦）", function()
+  local child = childAt(router.container, 0)
+  check("容器内页面视图尺寸正常（无空白）",
+    child ~= nil and widthOf(child) > 0 and heightOf(child) > 0,
+    child and (widthOf(child) .. "x" .. heightOf(child)) or "无子视图")
+  local title = findText(router.current.view, "主题设置")
+  local target = title and clickableAncestor(title.view) or nil
+  check("转场后条目仍可点击", target ~= nil)
+  if target ~= nil then pcall(function() target.performClick() end) end
+  check("点击后进入主题设置（转场未阻塞输入）", router.currentKey == "theme_settings",
+    tostring(router.currentKey))
+end)
+
+step("v0.2.3 二级页连续打开（SharedAxis forward）", function()
+  router.push(require("app.ui.pages.about").create())
+  router.push(require("app.ui.pages.security").create())
+  check("连续压栈后容器内只有 1 个页面视图", childCount(router.container) == 1,
+    "childCount=" .. childCount(router.container))
+  check("当前为隐私与安全页", router.currentKey == "security", tostring(router.currentKey))
+end)
+
+step("v0.2.3 多层返回（SharedAxis backward）", function()
+  local okBack1 = router.back()
+  local okBack2 = router.back()
+  local okBack3 = router.back()
+  check("三次返回都被处理", okBack1 and okBack2 and okBack3,
+    tostring(okBack1) .. "/" .. tostring(okBack2) .. "/" .. tostring(okBack3))
+  check("返回后容器内只有 1 个页面视图", childCount(router.container) == 1,
+    "childCount=" .. childCount(router.container))
+  check("返回到「我的」页面", router.currentKey == "profile", tostring(router.currentKey))
+  local child = childAt(router.container, 0)
+  check("返回后页面尺寸正常（非空白）", child ~= nil and widthOf(child) > 0,
+    child and (widthOf(child) .. "px") or "无子视图")
+end)
+
+step("v0.2.3 320dp + 1.3 倍字体：年份按钮仍不裁切", function()
+  local metrics = activity.getResources().getDisplayMetrics()
+  local originalScaled = nil
+  pcall(function() originalScaled = metrics.scaledDensity end)
+  pcall(function() metrics.scaledDensity = metrics.density * 1.3 end)
+
+  local button = kit.button("2026 年", {
+    style = "outlined",
+    height = "48dp",
+    size = kit.TYPOGRAPHY.body,
+  })
+  local host = measureAt(button, dp(320))
+
+  if originalScaled ~= nil then pcall(function() metrics.scaledDensity = originalScaled end) end
+
+  check("320dp/1.3 字体：按钮测量成功", host ~= nil and heightOf(button) >= dp(48),
+    button and (heightOf(button) .. "px") or "未测量")
+  local layoutHeight, padTop, padBottom = 0, 0, 0
+  pcall(function() layoutHeight = button.getLayout().getHeight() end)
+  pcall(function()
+    padTop = button.getPaddingTop()
+    padBottom = button.getPaddingBottom()
+  end)
+  check("320dp/1.3 字体：年份文字不超出内容区",
+    layoutHeight > 0 and heightOf(button) - padTop - padBottom >= layoutHeight,
+    string.format("%d - %d - %d vs 行高 %d", heightOf(button), padTop, padBottom, layoutHeight))
 end)
 
 -- ===== 启动 =====

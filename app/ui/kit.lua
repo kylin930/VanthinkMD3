@@ -35,6 +35,21 @@ M.TYPOGRAPHY = {
 -- 窄屏阈值：低于该宽度（dp）双列布局会被挤压成零宽，需要退化为单列
 M.COMPACT_WIDTH_DP = 360
 
+-- 统一间距规范（单位 dp）。所有页面统一从这里取值，不再各自写魔法数字。
+-- pageHorizontal 是页面的左右视觉基线：卡片边缘、列表项图标、分组标题都对齐这条线；
+-- 列表项正文列按 MD3 keyline 落在 pageHorizontal + listIcon + listIconGap = 56dp。
+M.SPACING = {
+  pageHorizontal = 16,
+  sectionTop = 20,
+  sectionBottom = 8,
+  cardGap = 12,
+  groupGap = 10,
+  cardPadding = 16,
+  pageBottom = 16,
+  listIcon = 24,
+  listIconGap = 16,
+}
+
 local function load(spec)
   return loadlayout(spec)
 end
@@ -62,22 +77,81 @@ local function sizeToPx(value)
   return ViewGroupLayoutParams.WRAP_CONTENT
 end
 
+-- 边距数值一律按 dp 解释（"16dp" 与 16 都表示 16dp）。
+-- 早期版本把裸数字直接当像素：marginHorizontal = 16 实际只有 5.3dp，
+-- 实机上看起来就是「卡片贴边、间距没生效」。
+local function marginToPx(value)
+  if value == nil then return 0 end
+  if type(value) == "number" then return theme.dp(value) end
+  return sizeToPx(value)
+end
+
 -- 把视图的 LayoutParams 换成带 weight 的 LinearLayout.LayoutParams
 -- opts: width / height / weight / marginTop / marginBottom / marginStart / marginEnd
+-- 注意：width / height 走 sizeToPx（数字按像素），margin* 走 marginToPx（数字按 dp）。
 function M.applyLinearParams(view, opts)
   if view == nil then return view end
   local o = opts or {}
   local ok = pcall(function()
     local params = LinearLayoutParams(sizeToPx(o.width or "match"), sizeToPx(o.height or "wrap"))
     if o.weight ~= nil then params.weight = o.weight end
-    local top = sizeToPx(o.marginTop or 0)
-    local bottom = sizeToPx(o.marginBottom or 0)
-    local start = sizeToPx(o.marginStart or 0)
-    local endMargin = sizeToPx(o.marginEnd or 0)
-    params.setMargins(start, top, endMargin, bottom)
+    params.setMargins(marginToPx(o.marginStart), marginToPx(o.marginTop),
+      marginToPx(o.marginEnd), marginToPx(o.marginBottom))
     view.setLayoutParams(params)
   end)
   return ok and view or view
+end
+
+-- 显式应用外边距。
+-- 原因：独立 loadlayout 出来的根视图拿到的 LayoutParams 是 android.view.ViewGroup$LayoutParams，
+-- 该类型**没有边距字段**，写在 spec 里的 layout_marginStart / layout_marginTop 会被静默丢弃。
+-- 实机实测：kit.card({...}, { marginHorizontal = 16 }) 加入竖向 LinearLayout 后 leftMargin 仍为 0，
+-- 卡片直接贴屏幕边缘。这里把边距写进 LinearLayout.LayoutParams，并保留原有宽高与权重。
+-- 可以直接用 LinearLayout.LayoutParams：kit 的 column / row / scrollPage / card 内部的父容器
+-- 都是 LinearLayout，addView 时会复用这份参数（含边距与 weight）。
+-- opts: horizontal / start / end / top / bottom（数值按 dp 处理，也接受 "16dp"）
+function M.applyMargins(view, opts)
+  if view == nil then return view end
+  local o = opts or {}
+  local startMargin = o.start or o.horizontal or o.marginStart or 0
+  local endMargin = o["end"] or o.horizontal or o.marginEnd or 0
+  local topMargin = o.top or o.marginTop or 0
+  local bottomMargin = o.bottom or o.marginBottom or 0
+  if startMargin == 0 and endMargin == 0 and topMargin == 0 and bottomMargin == 0 then
+    return view
+  end
+  pcall(function()
+    local current = view.getLayoutParams()
+    local width = ViewGroupLayoutParams.WRAP_CONTENT
+    local height = ViewGroupLayoutParams.WRAP_CONTENT
+    local weight = 0
+    if current ~= nil then
+      if current.width ~= nil then width = current.width end
+      if current.height ~= nil then height = current.height end
+      local okWeight, value = pcall(function() return current.weight end)
+      if okWeight and type(value) == "number" then weight = value end
+    end
+    local params = LinearLayoutParams(width, height, weight)
+    params.setMargins(marginToPx(startMargin), marginToPx(topMargin),
+      marginToPx(endMargin), marginToPx(bottomMargin))
+    view.setLayoutParams(params)
+  end)
+  return view
+end
+
+-- 给可点击容器套上系统 Ripple（?attr/selectableItemBackground）。
+-- 不使用自定义 drawable：原生 ripple 自带按下反馈、无障碍与主题着色。
+function M.ripple(view)
+  if view == nil then return view end
+  pcall(function()
+    local TypedValue = luajava.bindClass("android.util.TypedValue")
+    local attr = luajava.bindClass("android.R$attr").selectableItemBackground
+    local value = TypedValue()
+    if activity.getTheme().resolveAttribute(attr, value, true) and value.resourceId ~= 0 then
+      view.setBackgroundResource(value.resourceId)
+    end
+  end)
+  return view
 end
 
 -- ===== 排版 =====
@@ -98,10 +172,6 @@ function M.text(content, opts)
     spec.ellipsize = "end"
   end
   if o.bold then spec.textStyle = "bold" end
-  if o.marginStart then spec.layout_marginStart = o.marginStart .. "dp" end
-  if o.marginEnd then spec.layout_marginEnd = o.marginEnd .. "dp" end
-  if o.marginTop then spec.layout_marginTop = o.marginTop .. "dp" end
-  if o.marginBottom then spec.layout_marginBottom = o.marginBottom .. "dp" end
   local view = load(spec)
   -- width = "0dp" 只有在父容器分配了 weight 时才有意义。
   -- 漏写 weight 的调用会让宽度恒为 0，文字整体不可见，
@@ -117,6 +187,14 @@ function M.text(content, opts)
       marginBottom = o.marginBottom,
       marginStart = o.marginStart,
       marginEnd = o.marginEnd,
+    })
+  else
+    -- 无 weight 的文本同样需要显式边距：loadlayout 根视图的 spec 边距不会生效
+    M.applyMargins(view, {
+      start = o.marginStart,
+      top = o.marginTop,
+      bottom = o.marginBottom,
+      ["end"] = o.marginEnd,
     })
   end
   return view
@@ -164,14 +242,14 @@ end
 
 function M.divider(marginTop, marginBottom)
   local colors = theme.colors()
-  return load({
+  local view = load({
     MaterialDivider,
     layout_width = "match",
     layout_height = "1dp",
-    layout_marginTop = (marginTop or 0) .. "dp",
-    layout_marginBottom = (marginBottom or 0) .. "dp",
     dividerColor = colors.outlineVariant,
   })
+  M.applyMargins(view, { top = marginTop or 0, bottom = marginBottom or 0 })
+  return view
 end
 
 -- ===== 布局容器 =====
@@ -192,10 +270,6 @@ function M.column(children, opts)
   if o.paddingEnd then spec.paddingEnd = o.paddingEnd .. "dp" end
   if o.paddingTop then spec.paddingTop = o.paddingTop .. "dp" end
   if o.paddingBottom then spec.paddingBottom = o.paddingBottom .. "dp" end
-  if o.marginTop then spec.layout_marginTop = o.marginTop .. "dp" end
-  if o.marginBottom then spec.layout_marginBottom = o.marginBottom .. "dp" end
-  if o.marginStart then spec.layout_marginStart = o.marginStart .. "dp" end
-  if o.marginEnd then spec.layout_marginEnd = o.marginEnd .. "dp" end
   if o.gravity then spec.gravity = o.gravity end
   if o.background then spec.BackgroundColor = o.background end
   if o.id then spec.id = o.id end
@@ -208,6 +282,11 @@ function M.column(children, opts)
       width = o.width, height = o.height, weight = o.weight,
       marginTop = o.marginTop, marginBottom = o.marginBottom,
       marginStart = o.marginStart, marginEnd = o.marginEnd,
+    })
+  else
+    M.applyMargins(view, {
+      start = o.marginStart, top = o.marginTop,
+      bottom = o.marginBottom, ["end"] = o.marginEnd,
     })
   end
   return view
@@ -228,7 +307,6 @@ function M.row(children, opts)
   if o.paddingEnd then spec.paddingEnd = o.paddingEnd .. "dp" end
   if o.paddingTop then spec.paddingTop = o.paddingTop .. "dp" end
   if o.paddingBottom then spec.paddingBottom = o.paddingBottom .. "dp" end
-  if o.marginTop then spec.layout_marginTop = o.marginTop .. "dp" end
   if o.background then spec.BackgroundColor = o.background end
   if o.id then spec.id = o.id end
   for _, child in ipairs(children or {}) do
@@ -237,7 +315,14 @@ function M.row(children, opts)
   local view = load(spec)
   if o.weight ~= nil then
     M.applyLinearParams(view, {
-      width = o.width, height = o.height, weight = o.weight, marginTop = o.marginTop,
+      width = o.width, height = o.height, weight = o.weight,
+      marginTop = o.marginTop, marginBottom = o.marginBottom,
+      marginStart = o.marginStart, marginEnd = o.marginEnd,
+    })
+  else
+    M.applyMargins(view, {
+      start = o.marginStart, top = o.marginTop,
+      bottom = o.marginBottom, ["end"] = o.marginEnd,
     })
   end
   return view
@@ -352,23 +437,20 @@ function M.card(children, opts)
     CardBackgroundColor = o.background or colors.surfaceContainerLow,
     checkable = false,
   }
-  if o.marginTop then spec.layout_marginTop = o.marginTop .. "dp" end
-  if o.marginBottom then spec.layout_marginBottom = o.marginBottom .. "dp" end
-  if o.marginHorizontal then
-    spec.layout_marginStart = o.marginHorizontal .. "dp"
-    spec.layout_marginEnd = o.marginHorizontal .. "dp"
-  end
-  if o.weight then spec.layout_weight = o.weight end
   if o.id then spec.id = o.id end
 
   local inner = M.column(children or {}, {
     width = "match",
     height = "wrap",
-    padding = o.padding or 16,
+    padding = o.padding or M.SPACING.cardPadding,
   })
   spec[#spec + 1] = inner
   local card = load(spec)
-  -- 根卡片自身的 LayoutParams 不支持 weight，必须在加入父容器前显式替换
+  -- 根卡片的 spec 边距不会生效（见 applyMargins 注释），必须显式写入 LayoutParams：
+  -- weight 与边距都要在加入父容器**之前**设置好，否则外侧的 marginHorizontal 会被丢掉，
+  -- 卡片就会贴着屏幕边缘。
+  local marginStart = o.marginHorizontal or o.marginStart
+  local marginEnd = o.marginHorizontal or o.marginEnd
   if o.weight ~= nil then
     M.applyLinearParams(card, {
       width = o.width or "match",
@@ -376,8 +458,15 @@ function M.card(children, opts)
       weight = o.weight,
       marginTop = o.marginTop,
       marginBottom = o.marginBottom,
-      marginStart = o.marginHorizontal or o.marginStart,
-      marginEnd = o.marginHorizontal or o.marginEnd,
+      marginStart = marginStart,
+      marginEnd = marginEnd,
+    })
+  else
+    M.applyMargins(card, {
+      start = marginStart,
+      top = o.marginTop,
+      bottom = o.marginBottom,
+      ["end"] = marginEnd,
     })
   end
   if o.onClick ~= nil then
@@ -392,10 +481,16 @@ end
 function M.button(label, opts)
   local o = opts or {}
   local colors = theme.colors()
+  -- 高度用「最小高度」而不是固定 layout_height：
+  -- 固定高度在字体放大（例如系统字体 1.3 倍）时会把文字上下裁掉，
+  -- 而 MaterialButton 自带的 insetTop/insetBottom 还会再吃掉 12dp。
+  -- 改成 wrap + setMinimumHeight 后，1.0 倍字体时高度与设计一致，
+  -- 放大字体时按钮自然长高，文字不会被裁切，触控高度也始终不小于 48dp。
+  local minHeight = o.height or "48dp"
   local spec = {
     MaterialButton,
     layout_width = o.width or "wrap",
-    layout_height = o.height or "48dp",
+    layout_height = "wrap",
     text = label,
     textSize = (o.size or M.TYPOGRAPHY.body) .. "sp",
     checkable = false,
@@ -406,10 +501,16 @@ function M.button(label, opts)
     spec.styleAttr = "?attr/borderlessButtonStyle"
   end
   if o.weight then spec.layout_weight = o.weight end
-  if o.marginTop then spec.layout_marginTop = o.marginTop .. "dp" end
-  if o.marginStart then spec.layout_marginStart = o.marginStart .. "dp" end
-  if o.marginEnd then spec.layout_marginEnd = o.marginEnd .. "dp" end
   local button = load(spec)
+  pcall(function()
+    local px = sizeToPx(minHeight)
+    button.setMinimumHeight(px)
+    button.setMinHeight(px)
+  end)
+  M.applyMargins(button, {
+    start = o.marginStart, top = o.marginTop,
+    bottom = o.marginBottom, ["end"] = o.marginEnd,
+  })
   if o.iconName then
     local tint = o.iconColor
       or ((o.style == nil or o.style == "filled") and colors.onPrimary or colors.primary)
@@ -452,31 +553,49 @@ function M.iconButton(iconName, opts)
 end
 
 -- ===== 列表项 =====
+-- MD3 Leading Icon 布局：
+--   水平内边距 16dp / 图标容器 24×24 / 图标 24dp / 图标与文字间距 16dp
+--   → 正文列落在 16 + 24 + 16 = 56dp 的 MD3 列表 keyline 上。
+-- 高度：单行 56dp、双行 72dp（用最小高度保证，不是固定高度），
+-- 内容再多（三行以上、标题两行）时自然撑开，不会裁切文字。
+-- 整行仍然是点击区域：padding 与最小高度都作用在整行容器上，
+-- 缩小图标容器不会缩小触控区域。
 function M.listItem(opts)
   local o = opts or {}
   local colors = theme.colors()
+  local paddingHorizontal = o.paddingHorizontal or M.SPACING.pageHorizontal
+  local hasSubtitle = o.subtitle ~= nil and o.subtitle ~= ""
   local container = load({
     LinearLayout,
     orientation = "horizontal",
     layout_width = "match",
     layout_height = "wrap",
     gravity = "start|center_vertical",
-    paddingStart = (o.paddingHorizontal or 16) .. "dp",
-    paddingEnd = (o.paddingHorizontal or 16) .. "dp",
-    paddingTop = (o.paddingVertical or 14) .. "dp",
-    paddingBottom = (o.paddingVertical or 14) .. "dp",
+    paddingStart = paddingHorizontal .. "dp",
+    paddingEnd = paddingHorizontal .. "dp",
+    paddingTop = (o.paddingVertical or 12) .. "dp",
+    paddingBottom = (o.paddingVertical or 12) .. "dp",
   })
+  pcall(function()
+    container.setMinimumHeight(theme.dp(o.minHeight or (hasSubtitle and 72 or 56)))
+  end)
 
   if o.icon then
+    local iconSize = o.iconSize or M.SPACING.listIcon
+    -- 图标容器与图标同尺寸：多出来的空白只会把文字推远，MD3 的 leading icon 本身就是 24dp 网格
     local holder = load({
       FrameLayout,
-      layout_width = "40dp",
-      layout_height = "40dp",
+      layout_width = iconSize .. "dp",
+      layout_height = iconSize .. "dp",
     })
     -- 根视图的 LayoutParams 由控件自身决定，边距写在 spec 里不会被应用，
     -- 必须在加入父容器前显式换成 LinearLayout.LayoutParams。
-    M.applyLinearParams(holder, { width = "40dp", height = "40dp", marginEnd = 16 })
-    local iconView = M.icon(o.icon, o.iconSize or 22, o.iconColor or colors.primary)
+    M.applyLinearParams(holder, {
+      width = iconSize .. "dp",
+      height = iconSize .. "dp",
+      marginEnd = o.iconGap or M.SPACING.listIconGap,
+    })
+    local iconView = M.icon(o.icon, iconSize, o.iconColor or colors.primary)
     holder.addView(iconView, M.centeredParams())
     container.addView(holder)
   end
@@ -486,40 +605,50 @@ function M.listItem(opts)
     orientation = "vertical",
     layout_width = "0dp",
     layout_height = "wrap",
+    gravity = "start|center_vertical",
   })
   -- 必须显式 applyLinearParams：独立 loadlayout 的根视图会丢掉 layout_weight，
   -- 只剩 width = 0dp，主标题与副标题的可用宽度都是 0，整行文字不可见。
   M.applyLinearParams(textHolder, { width = "0dp", height = "wrap", weight = 1 })
   textHolder.addView(M.text(o.title or "", {
-    size = o.titleSize or M.TYPOGRAPHY.body,
+    size = o.titleSize or 15,
     color = o.titleColor or colors.onSurface,
     maxLines = o.titleMaxLines or 2,
   }))
-  if o.subtitle and o.subtitle ~= "" then
+  if hasSubtitle then
     textHolder.addView(M.text(o.subtitle, {
-      size = M.TYPOGRAPHY.label,
+      size = o.subtitleSize or 13,
       color = o.subtitleColor or colors.onSurfaceVariant,
       maxLines = o.subtitleMaxLines or 3,
-      marginTop = 3,
+      marginTop = 2,
     }))
   end
   container.addView(textHolder)
 
+  -- 右侧附加内容固定宽度、不参与挤压：textHolder 的 weight = 1 会先让出空间
   if o.trailingText then
     container.addView(M.text(o.trailingText, {
       size = M.TYPOGRAPHY.label,
       color = colors.onSurfaceVariant,
+      marginStart = 8,
     }))
   end
   if o.trailingView ~= nil then
+    M.applyMargins(o.trailingView, { start = 8 })
     container.addView(o.trailingView)
   elseif o.trailingIcon then
-    container.addView(M.icon(o.trailingIcon, 18, colors.onSurfaceVariant))
+    local view = M.icon(o.trailingIcon, 20, colors.onSurfaceVariant)
+    M.applyMargins(view, { start = 8 })
+    container.addView(view)
   elseif o.showChevron then
-    container.addView(M.icon("chevron_right", 18, colors.outline))
+    local view = M.icon("chevron_right", 20, colors.outline)
+    M.applyMargins(view, { start = 8 })
+    container.addView(view)
   end
 
   if o.onClick ~= nil then
+    -- 整行点击 + 原生 ripple
+    M.ripple(container)
     container.setClickable(true)
     container.setFocusable(true)
     container.setOnClickListener(function(view) o.onClick(view) end)
@@ -614,10 +743,12 @@ function M.textInput(opts)
     CardBackgroundColor = colors.surfaceContainerLowest,
     checkable = false,
   }
-  if o.marginTop then spec.layout_marginTop = o.marginTop .. "dp" end
-  if o.marginStart then spec.layout_marginStart = o.marginStart .. "dp" end
-  if o.marginEnd then spec.layout_marginEnd = o.marginEnd .. "dp" end
   local card = load(spec)
+  -- 根视图的 spec 边距不会生效，必须显式写入 LayoutParams（同 applyMargins 注释）
+  M.applyMargins(card, {
+    start = o.marginStart, top = o.marginTop,
+    bottom = o.marginBottom, ["end"] = o.marginEnd,
+  })
 
   local holder = load({
     LinearLayout,
@@ -726,7 +857,7 @@ function M.scrollPage(opts)
     orientation = "vertical",
     layout_width = "match",
     layout_height = "wrap",
-    paddingBottom = "12dp",
+    paddingBottom = M.SPACING.pageBottom .. "dp",
   })
   local scroll = load({
     ScrollView,
@@ -798,8 +929,9 @@ function M.pageHeader(title, subtitle, actions)
     layout_width = "match",
     layout_height = "wrap",
     gravity = "start|center_vertical",
-    paddingStart = "20dp",
-    paddingEnd = "16dp",
+    -- 左基线用到与卡片、列表图标相同的 pageHorizontal，页头标题不会比卡片更靠右
+    paddingStart = M.SPACING.pageHorizontal .. "dp",
+    paddingEnd = M.SPACING.pageHorizontal .. "dp",
     paddingTop = "16dp",
     paddingBottom = "8dp",
   })
@@ -832,6 +964,8 @@ function M.pageHeader(title, subtitle, actions)
 end
 
 -- 分组标题
+-- 左基线 = pageHorizontal（16dp），与卡片边缘、列表项图标左边缘对齐；
+-- 上间距 sectionTop / 下间距 sectionBottom 由 SPACING 统一控制。
 function M.sectionTitle(title, actionLabel, onAction)
   local colors = theme.colors()
   local row = load({
@@ -840,10 +974,10 @@ function M.sectionTitle(title, actionLabel, onAction)
     layout_width = "match",
     layout_height = "wrap",
     gravity = "start|center_vertical",
-    paddingStart = "20dp",
-    paddingEnd = "20dp",
-    paddingTop = "14dp",
-    paddingBottom = "6dp",
+    paddingStart = M.SPACING.pageHorizontal .. "dp",
+    paddingEnd = M.SPACING.pageHorizontal .. "dp",
+    paddingTop = M.SPACING.sectionTop .. "dp",
+    paddingBottom = M.SPACING.sectionBottom .. "dp",
   })
   local holder = load({
     LinearLayout,
@@ -872,23 +1006,32 @@ function M.sectionTitle(title, actionLabel, onAction)
   return row
 end
 
--- 分组容器（圆角卡片，内部列表项 + 分割线）
-function M.group(items)
+-- 分组容器：同一组列表项放在**一张**卡片里，用 Divider 分隔（不拆成多个卡片）。
+-- 分组之间的呼吸感由 groupGap（卡片下边距）保证。
+function M.group(items, opts)
+  local o = opts or {}
   local colors = theme.colors()
   local children = {}
   for index, item in ipairs(items) do
     if index > 1 then
-      children[#children + 1] = load({
+      -- 分割线与列表正文列对齐（16dp 缩进）
+      local divider = load({
         MaterialDivider,
         layout_width = "match",
         layout_height = "1dp",
-        layout_marginStart = "16dp",
         dividerColor = colors.outlineVariant,
       })
+      M.applyMargins(divider, { start = M.SPACING.pageHorizontal })
+      children[#children + 1] = divider
     end
     children[#children + 1] = item
   end
-  return M.card(children, { padding = 0, marginHorizontal = 16, marginTop = 4, marginBottom = 4 })
+  return M.card(children, {
+    padding = o.padding or 0,
+    marginHorizontal = o.marginHorizontal or M.SPACING.pageHorizontal,
+    marginTop = o.marginTop or 0,
+    marginBottom = o.marginBottom or M.SPACING.groupGap,
+  })
 end
 
 return M

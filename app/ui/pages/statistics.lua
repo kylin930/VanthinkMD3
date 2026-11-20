@@ -54,24 +54,35 @@ local function metricCard(spec, half)
     width = half and "0dp" or "match",
     height = "wrap",
     weight = half and 1 or nil,
-    padding = 14,
+    padding = kit.SPACING.cardPadding,
   })
 end
 
--- 两组摘要卡片：宽屏双列（等分 + 固定 12dp 间距），窄屏退化为单列。
+-- 两组摘要卡片：宽屏双列（等分 + 固定 cardGap 间距），窄屏退化为单列。
+-- 双列等分靠 weight，两列间距用 hSpacer（横向行里 kit.spacer 是 width=match，会把卡片挤没）。
 local function metricPair(left, right)
   if kit.isCompactWidth() then
     return kit.column({
       metricCard(left, false),
-      kit.spacer(10),
+      kit.spacer(kit.SPACING.cardGap),
       metricCard(right, false),
-    }, { width = "match", paddingStart = 16, paddingEnd = 16 })
+    }, {
+      width = "match",
+      paddingStart = kit.SPACING.pageHorizontal,
+      paddingEnd = kit.SPACING.pageHorizontal,
+    })
   end
   return kit.row({
     metricCard(left, true),
-    kit.hSpacer(12),
+    kit.hSpacer(kit.SPACING.cardGap),
     metricCard(right, true),
-  }, { width = "match", paddingStart = 16, paddingEnd = 16 })
+  }, {
+    width = "match",
+    -- 顶部对齐：两张卡片内容行数不同时高度会不同，居中会显得错位
+    gravity = "start|top",
+    paddingStart = kit.SPACING.pageHorizontal,
+    paddingEnd = kit.SPACING.pageHorizontal,
+  })
 end
 
 function M.create()
@@ -92,8 +103,16 @@ function M.create()
   })
   page.view = shell.root
 
+  -- 月份选择：只保留「月份图标 + 当前年月徽标」。
+  -- 刷新入口只保留页头那一个，这里不再放重复的刷新按钮。
   local function monthPicker()
-    local holder = kit.row({
+    local badge = kit.badge(string.format("%d 年 %d 月", page.year, page.month), {
+      background = colors.secondaryContainer,
+      color = colors.onSecondaryContainer,
+    })
+    -- 徽标左间距用 applyMargins：横向行里的 kit.spacer 宽度是 match，会把内容挤出屏幕
+    kit.applyMargins(badge, { start = 4 })
+    return kit.row({
       kit.iconButton("schedule", {
         onClick = function()
           dialogs.list({
@@ -112,22 +131,19 @@ function M.create()
           })
         end,
       }),
-      kit.badge(string.format("%d 年 %d 月", page.year, page.month), {
-        background = colors.secondaryContainer,
-        color = colors.onSecondaryContainer,
-      }),
-      -- 横向行内的间距必须用 hSpacer：kit.spacer 宽度是 match，会把按钮挤出屏幕
-      kit.hSpacer(6),
-      kit.iconButton("refresh", { onClick = function() page.load() end }),
+      badge,
     }, { width = "wrap" })
-    return holder
   end
 
+  -- 年份选择按钮：48dp 稳定触控高度。
+  -- 之前写成 36dp，MaterialButton 自带 insetTop/insetBottom（各 6dp），
+  -- 可用内容高度只剩 24dp，中文 + 数字混排的行高（约 20~22dp）贴着上下内边距，
+  -- 实机上表现为年份文字被裁切。48dp 后内容区 36dp，文字垂直居中且不再被裁。
   local function yearButton()
     return kit.button(tostring(page.year) .. " 年", {
       style = "outlined",
-      height = "36dp",
-      size = kit.TYPOGRAPHY.label,
+      height = "48dp",
+      size = kit.TYPOGRAPHY.body,
       onClick = function()
         local items = {}
         for offset = 0, 3 do
@@ -146,23 +162,33 @@ function M.create()
     })
   end
 
-  -- 年份 + 月份选择栏：宽屏一行，窄屏拆成两行，保证按钮与徽标都完整可见。
+  -- 年月筛选栏：整体水平居中，控件之间统一 8dp。
+  -- 320dp 窄屏会拆成两行（仍居中），保证按钮与徽标都完整显示、不贴右边缘。
   local function yearRow()
     if kit.isCompactWidth() then
       return kit.column({
         kit.row({ yearButton() }, {
-          width = "match", paddingStart = 20, paddingEnd = 16,
+          width = "match", gravity = "center_horizontal", paddingTop = 4,
         }),
         kit.row({ monthPicker() }, {
-          width = "match", paddingStart = 20, paddingEnd = 16, paddingTop = 6,
+          width = "match", gravity = "center_horizontal", paddingTop = 4,
         }),
-      }, { width = "match" })
+      }, {
+        width = "match",
+        paddingStart = kit.SPACING.pageHorizontal,
+        paddingEnd = kit.SPACING.pageHorizontal,
+      })
     end
     return kit.row({
       yearButton(),
       kit.hSpacer(8),
       monthPicker(),
-    }, { width = "match", paddingStart = 20, paddingEnd = 16 })
+    }, {
+      width = "match",
+      gravity = "center_horizontal",
+      paddingStart = kit.SPACING.pageHorizontal,
+      paddingEnd = kit.SPACING.pageHorizontal,
+    })
   end
 
   function page.render()
@@ -206,7 +232,7 @@ function M.create()
       return
     end
 
-    shell.add(kit.spacer(4))
+    shell.add(kit.spacer(8))
     shell.add(metricPair({
       title = "总练习次数",
       value = formatter.int(data.practice.count),
@@ -224,7 +250,7 @@ function M.create()
       accent = colors.tertiary,
       colors = colors,
     }))
-    shell.add(kit.spacer(6))
+    shell.add(kit.spacer(kit.SPACING.cardGap))
     shell.add(metricPair({
       title = "练习天数",
       value = formatter.int(data.days.count),
@@ -262,7 +288,7 @@ function M.create()
         end
         return chart.barChart({ points = points, heightDp = 190 })
       end)(),
-    }, { marginHorizontal = 16, padding = 12 }))
+    }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = 14 }))
 
     shell.add(kit.sectionTitle("每日练习时长（分钟）"))
     shell.add(kit.card({
@@ -283,7 +309,7 @@ function M.create()
         end
         return chart.lineChart({ points = points, heightDp = 190 })
       end)(),
-    }, { marginHorizontal = 16, padding = 12 }))
+    }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = 14 }))
 
     if data.pl.totalTime ~= nil and data.pl.totalTime > 0 then
       shell.add(kit.sectionTitle("磨耳朵"))
@@ -311,7 +337,7 @@ function M.create()
           size = kit.TYPOGRAPHY.label,
           color = colors.outline,
         }),
-      }, { marginHorizontal = 16, padding = 16 }))
+      }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
     end
 
     shell.add(kit.spacer(24))
