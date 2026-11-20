@@ -605,13 +605,12 @@ function M.textInput(opts)
     edit.setSingleLine(true)
   end
 
-  local params = load({
-    LinearLayout,
-    layout_width = "0dp",
-    layout_height = "wrap",
-    layout_weight = 1,
-  }).getLayoutParams()
-  holder.addView(edit, params)
+  -- 注意：这里不能借用临时 LinearLayout 的 getLayoutParams() 来取参数。
+  -- 独立 loadlayout 出来的根视图拿到的 LayoutParams 里 layout_weight 会丢失，
+  -- 结果编辑框宽度恒为 0dp，登录页输入框完全不可见。
+  -- 必须显式构造 LinearLayout.LayoutParams 后再 addView。
+  M.applyLinearParams(edit, { width = "0dp", height = "wrap", weight = 1 })
+  holder.addView(edit)
 
   local function applyStroke(color)
     pcall(function() card.setStrokeColor(theme.normalize(color)) end)

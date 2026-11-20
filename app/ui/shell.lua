@@ -141,6 +141,8 @@ local function clearRoot()
     pcall(function() M.root.removeAllViews() end)
   end
   router.init(nil)
+  -- 外壳重建后旧的页面视图已脱离窗口，缓存必须一起丢弃，否则会复用失效视图
+  router.clearTabCache()
   M.container = nil
   M.bottomNav = nil
 end

@@ -13,6 +13,7 @@ M.current = nil
 M.currentKey = nil
 M.stack = {}
 M.tabs = {}
+M.tabCache = {}
 M.onTabChanged = nil
 
 function M.init(container)
@@ -43,7 +44,7 @@ end
 
 function M.showTab(key)
   if M.container == nil then return end
-  if M.currentKey == key and M.stack[#M.stack] == nil then return end
+  if M.currentKey == key and #M.stack == 0 then return end
   while #M.stack > 0 do
     local entry = table.remove(M.stack)
     if type(entry.page) == "table" and entry.page.onHide then
@@ -51,18 +52,31 @@ function M.showTab(key)
     end
   end
   leaveCurrent()
-  local factory = M.tabs[key]
-  if factory == nil then
-    logger.e("未注册的页面: " .. tostring(key))
-    return
+
+  -- 主页页面实例按 key 缓存复用。
+  -- 每次切 tab 都 factory() 重建整页会让页面从零开始构建（先空态、再加载态、
+  -- 再列表），视觉上就是整屏闪几下，滚动位置也会丢。复用后切回只做 onShow。
+  local page = M.tabCache[key]
+  if page == nil then
+    local factory = M.tabs[key]
+    if factory == nil then
+      logger.e("未注册的页面: " .. tostring(key))
+      return
+    end
+    page = factory()
+    M.tabCache[key] = page
   end
-  local page = factory()
   M.current = page
   M.currentKey = key
   M.container.addView(page.view)
   if page.onShow then pcall(page.onShow) end
   if M.onTabChanged then pcall(M.onTabChanged, key) end
   return page
+end
+
+-- 丢弃所有缓存的主页实例（外壳重建、登录态切换时必须调用）
+function M.clearTabCache()
+  M.tabCache = {}
 end
 
 -- 压栈打开二级页；返回 page

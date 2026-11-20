@@ -142,34 +142,82 @@ function M.create()
       onClick = function()
         router.push(openDetail(item, function()
           state.setUnreadCount(unreadCount())
-          subtitleLabel.setText(string.format("共 %s 条 · 未读 %d 条",
-            formatter.int(page.count), unreadCount()))
-          page.renderBody()
+          -- 已读状态变了，卡片外观需要整体刷新
+          page.renderBody(true)
         end))
       end,
     })
   end
 
-  function page.renderBody()
+  -- 列表区固定结构：[卡片 1..N][页脚]。
+  -- 分页加载只追加新卡片、替换页脚，避免整块重建造成的列表闪烁。
+  local cardViews = {}
+  local footerView = nil
+  -- 状态占位（加载中 / 空态 / 错误）的引用，切回列表时必须显式移除
+  local statusView = nil
+
+  local function clearBody()
     body.removeAllViews()
+    cardViews = {}
+    footerView = nil
+    statusView = nil
+  end
+
+  local function buildFooter()
+    if page.hasMore then
+      if page.loading then
+        return kit.row({
+          kit.spinner(20),
+          kit.text("加载更多…", {
+            size = kit.TYPOGRAPHY.label,
+            color = colors.onSurfaceVariant,
+            marginStart = 8,
+          }),
+        }, { width = "match", padding = 16, gravity = "center" })
+      end
+      return kit.row({
+        kit.button("加载更多", {
+          style = "outlined",
+          height = "40dp",
+          size = kit.TYPOGRAPHY.label,
+          onClick = function() page.loadMore() end,
+        }),
+      }, { width = "match", padding = 12, gravity = "center" })
+    end
+    return kit.row({
+      kit.text("已经到底了", { size = kit.TYPOGRAPHY.label, color = colors.outline }),
+    }, { width = "match", padding = 16, gravity = "center" })
+  end
+
+  -- 页脚只在「形态」变化时重建（加载中/可加载更多/已到底），
+  -- 相同形态复用同一个 View，避免无意义的 removeView + addView 引起重排。
+  local footerKey = nil
+
+  local function applyFooter()
+    local key = (not page.hasMore) and "end" or (page.loading and "loading" or "more")
+    if footerView ~= nil and footerKey == key then return end
+    if footerView ~= nil then body.removeView(footerView) end
+    footerKey = key
+    footerView = buildFooter()
+    body.addView(footerView)
+  end
+
+  -- 状态占位若不被跟踪，数据返回后追加列表卡片时它会留在 body 里，
+  -- 其中的 CircularProgressIndicator 会持续每帧 invalidate，导致界面一直闪烁。
+  local function renderStatus(view)
+    clearBody()
+    statusView = view
+    if view ~= nil then body.addView(view) end
+  end
+
+  -- force = true 时强制整块重建（通知已读状态变化后，每张卡片外观都要刷新）
+  function page.renderBody(force)
     local unread = unreadCount()
     state.setUnreadCount(unread)
     subtitleLabel.setText(string.format("共 %s 条 · 未读 %d 条", formatter.int(page.count), unread))
 
-    if page.loading and #page.list == 0 then
-      body.addView(kit.row({
-        kit.spinner(24),
-        kit.text("正在加载通知…", {
-          size = kit.TYPOGRAPHY.body,
-          color = colors.onSurfaceVariant,
-          marginStart = 12,
-        }),
-      }, { width = "match", padding = 28, gravity = "center" }))
-      return
-    end
-
     if page.error ~= nil then
-      body.addView(kit.stateView({
+      renderStatus(kit.stateView({
         icon = "cloud_off",
         title = "通知加载失败",
         message = page.error,
@@ -181,43 +229,37 @@ function M.create()
     end
 
     if #page.list == 0 then
-      body.addView(kit.stateView({
-        icon = "notifications",
-        title = "还没有通知",
-        message = "老师发布通知后会显示在这里",
-      }))
+      if page.loading then
+        renderStatus(kit.row({
+          kit.spinner(24),
+          kit.text("正在加载通知…", {
+            size = kit.TYPOGRAPHY.body,
+            color = colors.onSurfaceVariant,
+            marginStart = 12,
+          }),
+        }, { width = "match", padding = 28, gravity = "center" }))
+      else
+        renderStatus(kit.stateView({
+          icon = "notifications",
+          title = "还没有通知",
+          message = "老师发布通知后会显示在这里",
+        }))
+      end
       return
     end
 
-    for _, item in ipairs(page.list) do
-      body.addView(buildItem(item))
+    if statusView ~= nil then
+      pcall(function() body.removeView(statusView) end)
+      statusView = nil
     end
 
-    if page.hasMore then
-      if page.loading then
-        body.addView(kit.row({
-          kit.spinner(20),
-          kit.text("加载更多…", {
-            size = kit.TYPOGRAPHY.label,
-            color = colors.onSurfaceVariant,
-            marginStart = 8,
-          }),
-        }, { width = "match", padding = 16, gravity = "center" }))
-      else
-        body.addView(kit.row({
-          kit.button("加载更多", {
-            style = "outlined",
-            height = "40dp",
-            size = kit.TYPOGRAPHY.label,
-            onClick = function() page.loadMore() end,
-          }),
-        }, { width = "match", padding = 12, gravity = "center" }))
-      end
-    else
-      body.addView(kit.row({
-        kit.text("已经到底了", { size = kit.TYPOGRAPHY.label, color = colors.outline }),
-      }, { width = "match", padding = 16, gravity = "center" }))
+    if force or #cardViews > #page.list then clearBody() end
+    for index = #cardViews + 1, #page.list do
+      local view = buildItem(page.list[index])
+      cardViews[index] = view
+      body.addView(view)
     end
+    applyFooter()
   end
 
   function page.render()
@@ -234,9 +276,10 @@ function M.create()
     end
     page.loading = true
     if reset then
+      -- 刷新时保留现有列表直到新数据返回，避免「整页清空再填充」的闪烁
       page.pageNo = 1
-      page.list = {}
       page.hasMore = true
+      page.replaceOnResult = true
     end
     page.error = nil
     page.renderBody()
@@ -246,6 +289,7 @@ function M.create()
       page.loaded = true
       shell.setRefreshing(false)
       if not ok then
+        page.replaceOnResult = false
         page.error = tostring(data)
         page.renderBody()
         if result ~= nil and result.kind == "auth" then
@@ -253,8 +297,13 @@ function M.create()
         end
         return
       end
-      for _, item in ipairs(data.list) do
-        page.list[#page.list + 1] = item
+      if page.replaceOnResult then
+        page.replaceOnResult = false
+        page.list = data.list
+      else
+        for _, item in ipairs(data.list) do
+          page.list[#page.list + 1] = item
+        end
       end
       page.count = data.count
       page.hasMore = data.hasMore
@@ -295,7 +344,7 @@ function M.create()
           for _, item in ipairs(page.list) do
             if noticeService.isUnread(item) then item.has_read = 1 end
           end
-          page.renderBody()
+          page.renderBody(true)
           dialogs.snackbar("已标记为已读")
         end)
       end,

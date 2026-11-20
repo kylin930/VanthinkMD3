@@ -227,7 +227,8 @@ function M.create()
   end
 
   function page.onShow()
-    page.render()
+    -- 页面实例被路由缓存复用；账号信息未变化时不要整页重建，否则切 tab 会闪烁。
+    -- 账号为空时才请求刷新，refreshAccount 拿到结果后再渲染一次。
     if state.account == nil and state.isLoggedIn() then
       page.refreshAccount()
     end

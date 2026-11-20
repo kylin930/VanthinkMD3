@@ -252,23 +252,79 @@ function M.create()
   page.syncFilter()
 
   -- ===== 列表区渲染 =====
-  local function renderBody()
+  -- 列表区结构固定为：[卡片 1..N][页脚]。
+  -- 分页加载只追加新卡片并替换页脚，不做整块 removeAllViews 重建，
+  -- 否则每次「加载更多」都会把已有卡片销毁重建，列表会明显闪一下。
+  local cardViews = {}
+  local footerView = nil
+  -- 状态占位（加载中 / 空态 / 错误）的引用，切回列表时必须显式移除
+  local statusView = nil
+
+  local function openCard(item)
+    local detail = require "app.ui.pages.homework_detail"
+    local router = require "app.router"
+    router.push(detail.create(item))
+  end
+
+  local footerKey = nil
+
+  local function clearBody()
     body.removeAllViews()
+    cardViews = {}
+    footerView = nil
+    footerKey = nil
+    statusView = nil
+  end
 
-    if page.loading and #page.list == 0 then
-      body.addView(kit.row({
-        kit.spinner(24),
-        kit.text("正在加载作业…", {
-          size = kit.TYPOGRAPHY.body,
-          color = colors.onSurfaceVariant,
-          marginStart = 12,
+  local function buildFooter()
+    if page.hasMore then
+      if page.loading then
+        return kit.row({
+          kit.spinner(20),
+          kit.text("加载更多…", {
+            size = kit.TYPOGRAPHY.label,
+            color = colors.onSurfaceVariant,
+            marginStart = 8,
+          }),
+        }, { width = "match", padding = 16, gravity = "center" })
+      end
+      return kit.row({
+        kit.button("加载更多", {
+          style = "outlined",
+          height = "40dp",
+          size = kit.TYPOGRAPHY.label,
+          onClick = function() page.loadMore() end,
         }),
-      }, { width = "match", padding = 28, gravity = "center" }))
-      return
+      }, { width = "match", padding = 12, gravity = "center" })
     end
+    return kit.row({
+      kit.text("已经到底了", { size = kit.TYPOGRAPHY.label, color = colors.outline }),
+    }, { width = "match", padding = 16, gravity = "center" })
+  end
 
+  -- 页脚只在形态变化时重建，相同形态复用同一个 View，避免多余的重排
+  local function applyFooter()
+    local key = (not page.hasMore) and "end" or (page.loading and "loading" or "more")
+    if footerView ~= nil and footerKey == key then return end
+    if footerView ~= nil then body.removeView(footerView) end
+    footerKey = key
+    footerView = buildFooter()
+    body.addView(footerView)
+  end
+
+  -- 状态占位（加载中 / 空态 / 错误）必须单独记账。
+  -- 之前它被 addView 进 body 后没有跟踪：数据返回、开始追加列表卡片时不会被移除，
+  -- 其中的 CircularProgressIndicator 会继续每帧 invalidate，
+  -- 整个主界面因此持续重绘（表现为一直闪烁）。切回列表时必须显式移除。
+  local function renderStatus(view)
+    clearBody()
+    statusView = view
+    if view ~= nil then body.addView(view) end
+  end
+
+  local function renderBody()
     if page.error ~= nil then
-      body.addView(kit.stateView({
+      renderStatus(kit.stateView({
         icon = "cloud_off",
         title = "作业加载失败",
         message = page.error,
@@ -280,53 +336,44 @@ function M.create()
     end
 
     if #page.list == 0 then
-      body.addView(kit.stateView({
-        icon = "task_alt",
-        title = "没有符合条件的作业",
-        message = "换个筛选条件，或下拉刷新试试",
-        actionLabel = "重置筛选",
-        onAction = function()
-          page.filter = { time = "all", degree = "all" }
-          page.syncFilter()
-          page.reload()
-        end,
-      }))
+      if page.loading then
+        renderStatus(kit.row({
+          kit.spinner(24),
+          kit.text("正在加载作业…", {
+            size = kit.TYPOGRAPHY.body,
+            color = colors.onSurfaceVariant,
+            marginStart = 12,
+          }),
+        }, { width = "match", padding = 28, gravity = "center" }))
+      else
+        renderStatus(kit.stateView({
+          icon = "task_alt",
+          title = "没有符合条件的作业",
+          message = "换个筛选条件，或下拉刷新试试",
+          actionLabel = "重置筛选",
+          onAction = function()
+            page.filter = { time = "all", degree = "all" }
+            page.syncFilter()
+            page.reload()
+          end,
+        }))
+      end
       return
     end
 
-    for _, item in ipairs(page.list) do
-      body.addView(buildCard(item, colors, function(homework)
-        local detail = require "app.ui.pages.homework_detail"
-        local router = require "app.router"
-        router.push(detail.create(homework))
-      end))
+    if statusView ~= nil then
+      pcall(function() body.removeView(statusView) end)
+      statusView = nil
     end
 
-    if page.hasMore then
-      if page.loading then
-        body.addView(kit.row({
-          kit.spinner(20),
-          kit.text("加载更多…", {
-            size = kit.TYPOGRAPHY.label,
-            color = colors.onSurfaceVariant,
-            marginStart = 8,
-          }),
-        }, { width = "match", padding = 16, gravity = "center" }))
-      else
-        body.addView(kit.row({
-          kit.button("加载更多", {
-            style = "outlined",
-            height = "40dp",
-            size = kit.TYPOGRAPHY.label,
-            onClick = function() page.loadMore() end,
-          }),
-        }, { width = "match", padding = 12, gravity = "center" }))
-      end
-    else
-      body.addView(kit.row({
-        kit.text("已经到底了", { size = kit.TYPOGRAPHY.label, color = colors.outline }),
-      }, { width = "match", padding = 16, gravity = "center" }))
+    -- 列表被替换（数量减少）时无法安全增量追加，回退到整块重建
+    if #cardViews > #page.list then clearBody() end
+    for index = #cardViews + 1, #page.list do
+      local view = buildCard(page.list[index], colors, openCard)
+      cardViews[index] = view
+      body.addView(view)
     end
+    applyFooter()
   end
 
   function page.render()
@@ -344,9 +391,11 @@ function M.create()
     end
     page.loading = true
     if reset then
+      -- 刷新时不清空 page.list：清空会让已有卡片瞬间消失，出现「整页变空再重新填充」
+      -- 的闪烁。这里只重置分页游标，并把本次结果标记为整体替换。
       page.pageNo = 1
-      page.list = {}
       page.hasMore = true
+      page.replaceOnResult = true
     end
     page.error = nil
     renderBody()
@@ -360,6 +409,7 @@ function M.create()
       page.loaded = true
       shell.setRefreshing(false)
       if not ok then
+        page.replaceOnResult = false
         page.error = tostring(data)
         page.render()
         if result ~= nil and result.kind == "auth" then
@@ -367,8 +417,13 @@ function M.create()
         end
         return
       end
-      for _, item in ipairs(data.list) do
-        page.list[#page.list + 1] = item
+      if page.replaceOnResult then
+        page.replaceOnResult = false
+        page.list = data.list
+      else
+        for _, item in ipairs(data.list) do
+          page.list[#page.list + 1] = item
+        end
       end
       page.total = data.total
       page.hasMore = data.hasMore
@@ -388,14 +443,15 @@ function M.create()
 
   function page.onShow()
     updateSummary()
+    -- 已加载过就保留现有视图不动：页面实例被路由缓存复用，
+    -- 切回该 tab 时若重建列表，画面会出现明显跳变。
     if not page.loaded then
       page.load(true)
-    else
-      renderBody()
     end
   end
 
-  page.render()
+  -- 不在创建时渲染：首次渲染由 onShow -> load 完成。
+  updateSummary()
   return page
 end
 

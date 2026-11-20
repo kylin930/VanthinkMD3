@@ -293,14 +293,14 @@ function M.create()
   end
 
   function page.onShow()
+    -- 页面实例被路由缓存复用；已加载过就保留现有图表，不再整页重建。
     if not page.loaded then
       page.load(page.data == nil)
-    else
-      page.render()
     end
   end
 
-  page.render()
+  -- 不在创建时渲染：首次渲染由 onShow -> load 完成，
+  -- 否则会先闪一帧「暂无统计数据」空态再切成加载中。
   return page
 end
 
