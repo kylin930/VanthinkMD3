@@ -106,12 +106,25 @@ function M.create()
     end, colors))
 
     shell.add(kit.sectionTitle("预设主题色"))
-    local rowHolder = kit.row({}, { width = "match", paddingStart = 16, paddingEnd = 16 })
+    -- 6 个色块在 320dp 窄屏上会超出一行宽度，放进横向滚动容器，
+    -- 保证每个色块完整可见而不是被裁切。
+    local HorizontalScrollView = luajava.bindClass("android.widget.HorizontalScrollView")
+    local rowHolder = loadlayout({
+      HorizontalScrollView,
+      layout_width = "match",
+      layout_height = "wrap",
+    })
+    pcall(function()
+      rowHolder.setHorizontalScrollBarEnabled(false)
+      rowHolder.setVerticalScrollBarEnabled(false)
+    end)
     local wrap = loadlayout({
       luajava.bindClass("android.widget.LinearLayout"),
       orientation = "horizontal",
-      layout_width = "match",
+      layout_width = "wrap",
       layout_height = "wrap",
+      paddingStart = "16dp",
+      paddingEnd = "16dp",
     })
     for _, preset in ipairs(config.SEED_PRESETS) do
       local holder = kit.column({
@@ -177,6 +190,7 @@ function M.create()
             size = kit.TYPOGRAPHY.label,
             color = colors.onSurfaceVariant,
             width = "0dp",
+            weight = 1,
             marginStart = 12,
           }),
       }, { width = "match" }),

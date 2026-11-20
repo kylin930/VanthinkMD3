@@ -22,6 +22,7 @@ local function listCard(title, items, colors, accentBackground, accentColor)
         size = kit.TYPOGRAPHY.body,
         color = colors.onSurface,
         width = "0dp",
+        weight = 1,
         marginStart = 8,
       }),
     }, { width = "match", gravity = "top" })

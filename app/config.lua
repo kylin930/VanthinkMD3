@@ -69,7 +69,7 @@ M.THEME_MODE = {
   DARK = "dark",
 }
 
-M.APP_VERSION = "1.0"
+M.APP_VERSION = "0.2.2"
 M.APP_NAME = "VanthinkMD3"
 
 -- 主题种子的可选方式：system（跟随壁纸，仅 Android 12+）、seed（自定义种子色）

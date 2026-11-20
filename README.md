@@ -46,6 +46,7 @@
 ### 统计
 
 - 摘要卡片：练习次数、答对题数、练习天数、拍照练习（含月均与指定月数值）。
+- 布局响应式：宽屏两张卡片等分一行（固定 12dp 间距），窄屏（< 360dp）自动退化为单列。
 - 柱状图（每日答对题数）、折线图（每日练习时长），**原生 Canvas 自绘**，无 WebView、无第三方图表库。
 - 年月筛选、磨耳朵累计时长、加载与错误状态。
 
@@ -127,8 +128,8 @@
 ```lua
 app_name = "VanthinkMD3"
 package_name = "com.xiaolin.vanthink"
-ver_name = "1.0"
-ver_code = "1"
+ver_name = "0.2.2"
+ver_code = "202"
 min_sdk = "26"
 target_sdk = "33"
 debug_mode = false
@@ -153,20 +154,42 @@ user_permission = {"INTERNET"}
 
 ---
 
-## 六、已知限制
+## 六、UI 布局约定
 
-1. **未用真实账号验证完整业务流程**。开发环境没有有效学生账号，因此登录成功后的作业列表、通知、统计等数据链路只验证了「接口可达 + 鉴权生效 + 错误码解析」，未验证真实数据渲染。详见 `docs/TEST_REPORT.md`。
+本项目所有视图都由 `loadlayout` 动态创建，`LayoutParams` 由控件自身决定，因此有两条硬性约定：
+
+- **带 weight 的视图必须在加入父容器前显式调用 `kit.applyLinearParams()`**。
+  独立 `loadlayout` 出来的根视图（`FrameLayout`、`MaterialCardView` 等）拿到的是
+  `FrameLayout.LayoutParams`，**没有 weight 字段**，
+  用 `layout_width = "0dp"` + `layout_weight = N` 会得到宽度 0 的不可见视图。
+  `kit.listItem` / `kit.pageHeader` / `kit.sectionTitle` / `kit.card` / `kit.column(weight = …)` 已内部处理，
+  自定义布局时需要自己调用。
+- **横向 LinearLayout 内的间距用 `kit.hSpacer(widthDp)`，纵向用 `kit.spacer(heightDp)`**。
+  `spacer` 的宽度是 `match_parent`，放进横向行会吃掉整行剩余宽度，把后面的控件挤出屏幕。
+
+二级页统一用 `router.subPage({ title = ..., content = <View> })` 创建外壳，
+`content` 会被挂载到返回栏下方的内容区并自动铺满（`setContent(view)` / `setContent(nil)` 可热替换与清空）。
+
+UI 回归诊断：运行 `tools/ui_regression.lua` 会真实测量各页面的 View 尺寸并输出
+`_ui_regression.txt`（不访问网络，服务层使用桩数据）。当前版本结果：PASS 120 / FAIL 0。
+
+---
+
+## 七、已知限制
+
+1. **未用真实账号验证完整业务流程**。开发环境没有有效学生账号，因此登录成功后的作业列表、通知、统计等数据链路只验证了「接口可达 + 鉴权生效 + 错误码解析」以及桩数据下的 UI 尺寸断言，未验证真实数据渲染。详见 `docs/TEST_REPORT.md`。
 2. **不支持摄像头扫码**。运行时无可用二维码解码库；Auth 迁移接收端改为粘贴链接。
 3. **语音练习未实现**。原项目该功能本身不可用（脚本从未加载、依赖 3 个非官方服务、存在字段级 bug），本版本仅保留业务识别与提示，未引入录音 / ASR / OSS 依赖。详见 `docs/UNIMPLEMENTED.md`。
 4. **批量自动做题已移除**。原因见 `docs/MIGRATION.md` 的合规性说明。
 5. **Auth 迁移与更新日志依赖第三方域名**，可用性不受本应用控制；这两项均为可选能力。
 6. **登录态失效依赖服务端返回 `errcode: 44`**，没有 refresh token 机制（官方接口未提供），失效后需重新登录。
 7. 深色模式首次切换会重建 Activity（Material 主题机制决定），属预期行为。
-8. 无平板 / 横屏专属布局，大屏下为单列拉伸。
+8. 无平板 / 横屏专属布局，大屏下为单列拉伸。窄屏（< 360dp）时统计页摘要卡片退化为单列，其他位置仍按可用宽度自适应。
+9. **深色模式下的文字对比度断言未复跑**：回归脚本只在当前系统模式下检查，需在真机切换深色后复跑一次。
 
 ---
 
-## 七、目录结构
+## 八、目录结构
 
 ```
 VanthinkMD3/
@@ -191,13 +214,14 @@ VanthinkMD3/
 │   └── utils/                formatter / validator / logger / qrcode
 ├── res/string/               字符串资源（app_title）
 ├── docs/                     交付文档
-├── tools/                    开发期验证脚本（不参与运行）
+├── tools/                    开发期验证脚本（不参与运行，不随打包产物发布）
+│   └── ui_regression.lua     UI 回归诊断：真实测量 View，检查二级页 / 列表项 / 统计页
 └── html/                     原 Web 版源码（仅作迁移参考，不参与构建）
 ```
 
 ---
 
-## 八、文档索引
+## 九、文档索引
 
 | 文档 | 内容 |
 | --- | --- |
@@ -205,6 +229,7 @@ VanthinkMD3/
 | `docs/ARCHITECTURE.md` | 分层架构、渲染策略、异步模型、关键设计决策 |
 | `docs/MIGRATION.md` | 原项目功能迁移对照表、合规性修改说明 |
 | `docs/SECURITY_AUDIT.md` | 安全审计：凭据存储、第三方风险、原项目遗留问题 |
-| `docs/TEST_REPORT.md` | 测试与验收报告（含实测证据与未验证项） |
+| `docs/TEST_REPORT.md` | v0.2.2 测试与验收报告（实测尺寸证据与未验证项） |
+| `docs/FIX_REPORT_v0.2.2.md` | v0.2.2 UI 渲染与布局修复记录（中文根因分析与改动清单） |
 | `docs/UNIMPLEMENTED.md` | 暂未实现功能清单与后续扩展方案 |
 | `docs/LEGACY_ANALYSIS.md` | 原 Web 项目源码分析（重构依据） |

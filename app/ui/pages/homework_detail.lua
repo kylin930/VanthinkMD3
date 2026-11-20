@@ -32,10 +32,10 @@ local function practiceRow(practice, index, colors, onOpen)
       background = colors.tertiaryContainer,
       color = colors.onTertiaryContainer,
     }))
-    badges.addView(kit.spacer(0))
-    badges.addView(kit.text("  ", { size = 8, color = colors.surface }))
   end
   if voice then
+    -- 横向行内的间距用 hSpacer：kit.spacer 宽度 match，会把后面的徽标挤出屏幕
+    if standardMode then badges.addView(kit.hSpacer(6)) end
     badges.addView(kit.badge("语音", {
       background = colors.secondaryContainer,
       color = colors.onSecondaryContainer,

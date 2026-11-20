@@ -7,6 +7,8 @@ local logger = require "app.utils.logger"
 local M = {}
 
 local FrameLayout = luajava.bindClass("android.widget.FrameLayout")
+local FrameLayoutParams = luajava.bindClass("android.widget.FrameLayout$LayoutParams")
+local ViewGroupLayoutParams = luajava.bindClass("android.view.ViewGroup$LayoutParams")
 
 M.container = nil
 M.current = nil
@@ -23,6 +25,25 @@ end
 local function detachAll()
   if M.container == nil then return end
   pcall(function() M.container.removeAllViews() end)
+end
+
+-- 把页面视图挂到内容容器：
+-- 1) 视图若还挂在别的父容器上（二级页复用、缓存实例重挂），先移除，
+--    否则 Android 会抛 "The specified child already has a parent"；
+-- 2) 显式给 FrameLayout.LayoutParams(match, match)，保证页面铺满内容区。
+--    独立 loadlayout 出来的根视图 LayoutParams 类型由控件自身决定，
+--    不做这一步时非 FrameLayout 系控件可能得到 wrap 尺寸。
+local function attachView(view)
+  if view == nil or M.container == nil then return end
+  pcall(function()
+    local parent = view.getParent()
+    if parent ~= nil then parent.removeView(view) end
+  end)
+  pcall(function()
+    view.setLayoutParams(FrameLayoutParams(
+      ViewGroupLayoutParams.MATCH_PARENT, ViewGroupLayoutParams.MATCH_PARENT))
+  end)
+  M.container.addView(view)
 end
 
 -- 离开当前页面
@@ -68,7 +89,7 @@ function M.showTab(key)
   end
   M.current = page
   M.currentKey = key
-  M.container.addView(page.view)
+  attachView(page.view)
   if page.onShow then pcall(page.onShow) end
   if M.onTabChanged then pcall(M.onTabChanged, key) end
   return page
@@ -89,7 +110,7 @@ function M.push(page)
   end
   M.current = page
   M.currentKey = page.key
-  M.container.addView(page.view)
+  attachView(page.view)
   if page.onShow then pcall(page.onShow) end
   return page
 end
@@ -107,7 +128,7 @@ function M.back()
   local entry = table.remove(M.stack)
   M.current = entry.page
   M.currentKey = entry.key
-  M.container.addView(entry.page.view)
+  attachView(entry.page.view)
   if entry.page.onResume then pcall(entry.page.onResume) end
   if M.onTabChanged then pcall(M.onTabChanged, M.currentKey) end
   return true
@@ -178,14 +199,31 @@ function M.subPage(opts)
   kit.applyLinearParams(contentHolder, { width = "match", height = "0dp", weight = 1 })
   root.addView(contentHolder)
 
+  -- 挂载正文：先清空并处理旧父容器，再显式给 match/match 的 FrameLayout.LayoutParams，
+  -- 保证页面正文（ScrollView / SwipeRefreshLayout 等）真正填满返回栏以下的内容区。
+  local function setContent(view)
+    pcall(function() contentHolder.removeAllViews() end)
+    if view == nil then return end
+    pcall(function()
+      local parent = view.getParent()
+      if parent ~= nil then parent.removeView(view) end
+    end)
+    pcall(function()
+      view.setLayoutParams(FrameLayoutParams(
+        ViewGroupLayoutParams.MATCH_PARENT, ViewGroupLayoutParams.MATCH_PARENT))
+    end)
+    contentHolder.addView(view)
+  end
+
+  -- 关键修复：此前只创建了内容容器，从未挂载 opts.content，
+  -- 于是所有 router.subPage({ content = shell.root }) 的二级页只有返回栏，正文空白。
+  setContent(o.content)
+
   return {
     root = root,
     bar = bar,
     content = contentHolder,
-    setContent = function(view)
-      contentHolder.removeAllViews()
-      if view ~= nil then contentHolder.addView(view) end
-    end,
+    setContent = setContent,
   }
 end
 

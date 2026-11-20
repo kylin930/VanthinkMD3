@@ -14,29 +14,64 @@ local M = {}
 local MaterialStyle = luajava.bindClass("com.google.android.material.R$style")
 local MaterialTextField = luajava.bindClass("vinx.material.textfield.MaterialTextField")
 
-local function metricCard(title, value, suffix, detail, accent, colors)
+-- 摘要卡片。half = true 表示双列布局中的一半宽度（0dp + weight = 1）；
+-- half = false 用于窄屏单列，占满可用宽度。
+-- 高度一律 wrap：父行高度是 wrap_content，子视图写 match_parent 在滚动容器里
+-- 会被测量成 0 高。
+local function metricCard(spec, half)
+  local colors = spec.colors
   return kit.card({
-    kit.text(title, { size = kit.TYPOGRAPHY.label, color = colors.onSurfaceVariant }),
+    kit.text(spec.title, {
+      size = kit.TYPOGRAPHY.label,
+      color = colors.onSurfaceVariant,
+      maxLines = 1,
+    }),
     kit.spacer(8),
     kit.row({
-      kit.text(value, {
+      -- 数值占用剩余宽度、单位固定宽度：数值再长也不会把「次 / 题 / 天」挤出卡片
+      kit.text(spec.value, {
         size = 24,
-        color = accent or colors.primary,
+        color = spec.accent or colors.primary,
         bold = true,
+        width = "0dp",
+        weight = 1,
+        maxLines = 1,
       }),
-      kit.text(suffix or "", {
+      kit.text(spec.suffix or "", {
         size = kit.TYPOGRAPHY.label,
         color = colors.onSurfaceVariant,
         marginStart = 4,
+        maxLines = 1,
       }),
     }, { width = "match" }),
     kit.spacer(4),
-    kit.text(detail or "", {
+    kit.text(spec.detail or "", {
       size = kit.TYPOGRAPHY.label,
       color = colors.outline,
-      maxLines = 2,
+      maxLines = 3,
     }),
-  }, { width = "0dp", weight = 1, padding = 14, marginStart = 0, marginEnd = 0 })
+  }, {
+    width = half and "0dp" or "match",
+    height = "wrap",
+    weight = half and 1 or nil,
+    padding = 14,
+  })
+end
+
+-- 两组摘要卡片：宽屏双列（等分 + 固定 12dp 间距），窄屏退化为单列。
+local function metricPair(left, right)
+  if kit.isCompactWidth() then
+    return kit.column({
+      metricCard(left, false),
+      kit.spacer(10),
+      metricCard(right, false),
+    }, { width = "match", paddingStart = 16, paddingEnd = 16 })
+  end
+  return kit.row({
+    metricCard(left, true),
+    kit.hSpacer(12),
+    metricCard(right, true),
+  }, { width = "match", paddingStart = 16, paddingEnd = 16 })
 end
 
 function M.create()
@@ -81,38 +116,53 @@ function M.create()
         background = colors.secondaryContainer,
         color = colors.onSecondaryContainer,
       }),
-      kit.spacer(6),
+      -- 横向行内的间距必须用 hSpacer：kit.spacer 宽度是 match，会把按钮挤出屏幕
+      kit.hSpacer(6),
       kit.iconButton("refresh", { onClick = function() page.load() end }),
     }, { width = "wrap" })
     return holder
   end
 
+  local function yearButton()
+    return kit.button(tostring(page.year) .. " 年", {
+      style = "outlined",
+      height = "36dp",
+      size = kit.TYPOGRAPHY.label,
+      onClick = function()
+        local items = {}
+        for offset = 0, 3 do
+          local year = now.year - offset
+          items[#items + 1] = { label = year .. " 年", value = year }
+        end
+        dialogs.list({
+          title = "选择年份",
+          items = items,
+          onSelect = function(item)
+            page.year = item.value
+            page.load()
+          end,
+        })
+      end,
+    })
+  end
+
+  -- 年份 + 月份选择栏：宽屏一行，窄屏拆成两行，保证按钮与徽标都完整可见。
   local function yearRow()
-    local row = kit.row({
-      kit.button(tostring(page.year) .. " 年", {
-        style = "outlined",
-        height = "36dp",
-        size = kit.TYPOGRAPHY.label,
-        onClick = function()
-          local items = {}
-          for offset = 0, 3 do
-            local year = now.year - offset
-            items[#items + 1] = { label = year .. " 年", value = year }
-          end
-          dialogs.list({
-            title = "选择年份",
-            items = items,
-            onSelect = function(item)
-              page.year = item.value
-              page.load()
-            end,
-          })
-        end,
-      }),
-      kit.spacer(8),
+    if kit.isCompactWidth() then
+      return kit.column({
+        kit.row({ yearButton() }, {
+          width = "match", paddingStart = 20, paddingEnd = 16,
+        }),
+        kit.row({ monthPicker() }, {
+          width = "match", paddingStart = 20, paddingEnd = 16, paddingTop = 6,
+        }),
+      }, { width = "match" })
+    end
+    return kit.row({
+      yearButton(),
+      kit.hSpacer(8),
       monthPicker(),
     }, { width = "match", paddingStart = 20, paddingEnd = 16 })
-    return row
   end
 
   function page.render()
@@ -157,29 +207,41 @@ function M.create()
     end
 
     shell.add(kit.spacer(4))
-    shell.add(kit.row({
-      metricCard("总练习次数", formatter.int(data.practice.count), "次",
-        string.format("月均 %s 次 · 本月 %s 次",
-          formatter.number(data.practice.avg), formatter.int(data.practice.monthAvg)),
-        colors.primary, colors),
-      kit.spacer(12),
-      metricCard("答对题数", formatter.number(data.exercise.count), "题",
-        string.format("月均 %s 题 · 本月 %s 题",
-          formatter.number(data.exercise.avg), formatter.int(data.exercise.monthAvg)),
-        colors.tertiary, colors),
-    }, { width = "match", paddingStart = 16, paddingEnd = 16 }))
+    shell.add(metricPair({
+      title = "总练习次数",
+      value = formatter.int(data.practice.count),
+      suffix = "次",
+      detail = string.format("月均 %s 次 · 本月 %s 次",
+        formatter.number(data.practice.avg), formatter.int(data.practice.monthAvg)),
+      accent = colors.primary,
+      colors = colors,
+    }, {
+      title = "答对题数",
+      value = formatter.number(data.exercise.count),
+      suffix = "题",
+      detail = string.format("月均 %s 题 · 本月 %s 题",
+        formatter.number(data.exercise.avg), formatter.int(data.exercise.monthAvg)),
+      accent = colors.tertiary,
+      colors = colors,
+    }))
     shell.add(kit.spacer(6))
-    shell.add(kit.row({
-      metricCard("练习天数", formatter.int(data.days.count), "天",
-        string.format("日均 %s 分钟 · 本月日均 %s 分钟",
-          formatter.number(data.days.avg), formatter.int(data.days.monthAvg)),
-        colors.secondary, colors),
-      kit.spacer(12),
-      metricCard("拍照练习", formatter.int(data.photo.count), "次",
-        string.format("月均 %s 次 · 本月 %s 次",
-          formatter.number(data.photo.avg), formatter.int(data.photo.monthAvg)),
-        colors.primary, colors),
-    }, { width = "match", paddingStart = 16, paddingEnd = 16 }))
+    shell.add(metricPair({
+      title = "练习天数",
+      value = formatter.int(data.days.count),
+      suffix = "天",
+      detail = string.format("日均 %s 分钟 · 本月日均 %s 分钟",
+        formatter.number(data.days.avg), formatter.int(data.days.monthAvg)),
+      accent = colors.secondary,
+      colors = colors,
+    }, {
+      title = "拍照练习",
+      value = formatter.int(data.photo.count),
+      suffix = "次",
+      detail = string.format("月均 %s 次 · 本月 %s 次",
+        formatter.number(data.photo.avg), formatter.int(data.photo.monthAvg)),
+      accent = colors.primary,
+      colors = colors,
+    }))
 
     shell.add(kit.sectionTitle("每日答对题数"))
     shell.add(kit.card({

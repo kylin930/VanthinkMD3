@@ -70,10 +70,13 @@ local function createImageView(widthPx, heightPx)
   return view
 end
 
-local function measureWidth()
+-- 图表位图宽度：屏幕宽度减去卡片两侧的外边距与内边距（默认页面边距 16dp + 内边距 12dp）。
+-- 位图由 ImageView 以 fitXY 铺满可用宽度，这里只要保证与实际可用宽度接近，
+-- 避免图表被横向控件挤压或出现缩放失真。
+local function measureWidth(insetDp)
   local metrics = activity.getResources().getDisplayMetrics()
-  -- 屏幕宽度减去页面左右内边距与卡片内边距
-  return math.max(320, metrics.widthPixels - theme.dp(16 * 2 + 16 * 2))
+  local inset = theme.dp((insetDp or 28) * 2)
+  return math.max(theme.dp(200), metrics.widthPixels - inset)
 end
 
 -- 绘制坐标轴与网格，返回绘图区
@@ -120,7 +123,7 @@ function M.barChart(opts)
   local heightDp = o.heightDp or 180
   local colors = theme.colors()
 
-  local widthPx = measureWidth()
+  local widthPx = measureWidth(o.insetDp)
   local heightPx = theme.dp(heightDp)
   local bitmap = Bitmap.createBitmap(widthPx, heightPx, BitmapConfig.ARGB_8888)
   local canvas = Canvas(bitmap)
@@ -191,7 +194,7 @@ function M.lineChart(opts)
   local heightDp = o.heightDp or 180
   local colors = theme.colors()
 
-  local widthPx = measureWidth()
+  local widthPx = measureWidth(o.insetDp)
   local heightPx = theme.dp(heightDp)
   local bitmap = Bitmap.createBitmap(widthPx, heightPx, BitmapConfig.ARGB_8888)
   local canvas = Canvas(bitmap)

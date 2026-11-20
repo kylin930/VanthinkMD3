@@ -32,6 +32,9 @@ M.TYPOGRAPHY = {
   label = 12,
 }
 
+-- 窄屏阈值：低于该宽度（dp）双列布局会被挤压成零宽，需要退化为单列
+M.COMPACT_WIDTH_DP = 360
+
 local function load(spec)
   return loadlayout(spec)
 end
@@ -99,16 +102,64 @@ function M.text(content, opts)
   if o.marginEnd then spec.layout_marginEnd = o.marginEnd .. "dp" end
   if o.marginTop then spec.layout_marginTop = o.marginTop .. "dp" end
   if o.marginBottom then spec.layout_marginBottom = o.marginBottom .. "dp" end
-  return load(spec)
+  local view = load(spec)
+  -- width = "0dp" 只有在父容器分配了 weight 时才有意义。
+  -- 漏写 weight 的调用会让宽度恒为 0，文字整体不可见，
+  -- 因此这里统一兜底：显式 weight 优先，否则 0dp 视为 weight = 1。
+  local weight = o.weight
+  if weight == nil and o.width == "0dp" then weight = 1 end
+  if weight ~= nil then
+    M.applyLinearParams(view, {
+      width = o.width or "0dp",
+      height = o.height or "wrap",
+      weight = weight,
+      marginTop = o.marginTop,
+      marginBottom = o.marginBottom,
+      marginStart = o.marginStart,
+      marginEnd = o.marginEnd,
+    })
+  end
+  return view
 end
 
 -- ===== 间距 =====
+-- 纵向间距：宽度 match，只能放进竖向 LinearLayout。
+-- 放进横向行会吃掉整行剩余宽度，把后面的内容挤出屏幕（横向间距请用 hSpacer）。
 function M.spacer(heightDp)
   return load({
     Space,
     layout_width = "match",
     layout_height = tostring(heightDp) .. "dp",
   })
+end
+
+-- 横向间距：固定宽度、高度 wrap（自身高度为 0，不影响父容器高度测量）。
+-- 只能放进横向 LinearLayout。
+function M.hSpacer(widthDp)
+  return load({
+    Space,
+    layout_width = tostring(math.floor(widthDp or 8)) .. "dp",
+    layout_height = "wrap",
+  })
+end
+
+-- 当前窗口宽度（dp）。用 configuration.screenWidthDp，不受字体缩放影响。
+function M.windowWidthDp()
+  local ok, value = pcall(function()
+    return activity.getResources().getConfiguration().screenWidthDp
+  end)
+  if ok and type(value) == "number" and value > 0 then return value end
+  local okMetrics, width = pcall(function()
+    local metrics = activity.getResources().getDisplayMetrics()
+    return metrics.widthPixels / metrics.density
+  end)
+  if okMetrics and type(width) == "number" and width > 0 then return width end
+  return 360
+end
+
+-- 窄屏判定：双列 / 横向排列的内容在该宽度以下需要退化为单列
+function M.isCompactWidth()
+  return M.windowWidthDp() < M.COMPACT_WIDTH_DP
 end
 
 function M.divider(marginTop, marginBottom)
@@ -421,8 +472,10 @@ function M.listItem(opts)
       FrameLayout,
       layout_width = "40dp",
       layout_height = "40dp",
-      layout_marginEnd = "16dp",
     })
+    -- 根视图的 LayoutParams 由控件自身决定，边距写在 spec 里不会被应用，
+    -- 必须在加入父容器前显式换成 LinearLayout.LayoutParams。
+    M.applyLinearParams(holder, { width = "40dp", height = "40dp", marginEnd = 16 })
     local iconView = M.icon(o.icon, o.iconSize or 22, o.iconColor or colors.primary)
     holder.addView(iconView, M.centeredParams())
     container.addView(holder)
@@ -433,21 +486,22 @@ function M.listItem(opts)
     orientation = "vertical",
     layout_width = "0dp",
     layout_height = "wrap",
-    layout_weight = 1,
   })
+  -- 必须显式 applyLinearParams：独立 loadlayout 的根视图会丢掉 layout_weight，
+  -- 只剩 width = 0dp，主标题与副标题的可用宽度都是 0，整行文字不可见。
+  M.applyLinearParams(textHolder, { width = "0dp", height = "wrap", weight = 1 })
   textHolder.addView(M.text(o.title or "", {
     size = o.titleSize or M.TYPOGRAPHY.body,
     color = o.titleColor or colors.onSurface,
+    maxLines = o.titleMaxLines or 2,
   }))
   if o.subtitle and o.subtitle ~= "" then
-    local subtitle = M.text(o.subtitle, {
+    textHolder.addView(M.text(o.subtitle, {
       size = M.TYPOGRAPHY.label,
       color = o.subtitleColor or colors.onSurfaceVariant,
       maxLines = o.subtitleMaxLines or 3,
-    })
-    local params = subtitle.getLayoutParams()
-    if params ~= nil then params.topMargin = theme.dp(3) end
-    textHolder.addView(subtitle)
+      marginTop = 3,
+    }))
   end
   container.addView(textHolder)
 
@@ -754,21 +808,23 @@ function M.pageHeader(title, subtitle, actions)
     orientation = "vertical",
     layout_width = "0dp",
     layout_height = "wrap",
-    layout_weight = 1,
   })
+  -- 同上：weight 必须在加入父容器前显式写入 LinearLayout.LayoutParams，
+  -- 否则标题与副标题可用宽度为 0；标题也用 maxLines 兜底，避免挤压右侧操作按钮。
+  M.applyLinearParams(textHolder, { width = "0dp", height = "wrap", weight = 1 })
   textHolder.addView(M.text(title, {
     size = M.TYPOGRAPHY.display,
     color = colors.onSurface,
     bold = true,
+    maxLines = 2,
   }))
   if subtitle and subtitle ~= "" then
-    local subtitleView = M.text(subtitle, {
+    textHolder.addView(M.text(subtitle, {
       size = M.TYPOGRAPHY.label,
       color = colors.onSurfaceVariant,
-    })
-    local params = subtitleView.getLayoutParams()
-    if params ~= nil then params.topMargin = theme.dp(4) end
-    textHolder.addView(subtitleView)
+      maxLines = 2,
+      marginTop = 4,
+    }))
   end
   header.addView(textHolder)
   for _, action in ipairs(actions or {}) do header.addView(action) end
@@ -794,12 +850,14 @@ function M.sectionTitle(title, actionLabel, onAction)
     orientation = "horizontal",
     layout_width = "0dp",
     layout_height = "wrap",
-    layout_weight = 1,
   })
+  -- 显式 LayoutParams：否则 holder 宽度为 0，分组标题与右侧操作文字都不会显示。
+  M.applyLinearParams(holder, { width = "0dp", height = "wrap", weight = 1 })
   holder.addView(M.text(title, {
     size = M.TYPOGRAPHY.label,
     color = colors.primary,
     bold = true,
+    maxLines = 1,
   }))
   row.addView(holder)
   if actionLabel then
