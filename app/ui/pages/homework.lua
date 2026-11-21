@@ -8,8 +8,14 @@ local config = require "app.config"
 local state = require "app.state"
 local homeworkService = require "app.services.homework"
 local formatter = require "app.utils.formatter"
+local dialogs = require "app.ui.dialogs"
 
 local M = {}
+
+-- 作业的唯一键：必须使用真实 id，不同作业中的同名练习/作业不能混为一谈
+local function selectionKey(item)
+  return tostring(item.id)
+end
 
 local LinearLayout = luajava.bindClass("android.widget.LinearLayout")
 local HorizontalScrollView = luajava.bindClass("android.widget.HorizontalScrollView")
@@ -43,12 +49,31 @@ local function statusBadge(item, colors)
   })
 end
 
-local function buildCard(item, colors, onOpen)
+-- handlers: { onOpen = fn, onToggle = fn, selectionActive = bool, selected = bool }
+-- 返回卡片视图与 setSelected(value) 更新选中态（多选模式下用，避免整列表重建）
+local function buildCard(item, colors, handlers)
+  local o = handlers or {}
   local className = item.vanclass_name or "已退班"
   if className == "" then className = "已退班" end
   local typeName = (type(item["type"]) == "table" and item["type"].name) or "普通模式"
   local count = tonumber(item.testbank_count) or 0
   local percent = completionPercent(item)
+
+  local selectionActive = o.selectionActive == true
+  local selectionLabel = nil
+  local trailing = statusBadge(item, colors)
+  if selectionActive then
+    selectionLabel = kit.text(o.selected == true and "已选" or "未选", {
+      size = kit.TYPOGRAPHY.label,
+      color = o.selected == true and colors.primary or colors.onSurfaceVariant,
+      bold = o.selected == true,
+    })
+    trailing = kit.pill(selectionLabel, {
+      background = colors.surfaceContainerHighest,
+      paddingHorizontal = 10,
+      paddingVertical = 4,
+    })
+  end
 
   local children = {
     kit.row({
@@ -60,7 +85,7 @@ local function buildCard(item, colors, onOpen)
           maxLines = 2,
         }),
       }, { width = "0dp", weight = 1 }),
-      statusBadge(item, colors),
+      trailing,
     }, { width = "match" }),
     kit.spacer(6),
     kit.text(string.format("%s · %s · %s", className, typeName,
@@ -95,12 +120,36 @@ local function buildCard(item, colors, onOpen)
     })
   end
 
-  return kit.card(children, {
+  local card = kit.card(children, {
     marginHorizontal = kit.SPACING.pageHorizontal,
     marginTop = kit.SPACING.cardGap,
     marginBottom = 0,
-    onClick = function() onOpen(item) end,
+    onClick = function()
+      if selectionActive then
+        if o.onToggle ~= nil then o.onToggle() end
+      elseif o.onOpen ~= nil then
+        o.onOpen(item)
+      end
+    end,
   })
+
+  local function setSelected(selected)
+    if not selectionActive then return end
+    if selectionLabel ~= nil then
+      pcall(function()
+        selectionLabel.setText(selected and "已选" or "未选")
+        selectionLabel.setTextColor(theme.normalize(
+          selected and colors.primary or colors.onSurfaceVariant))
+      end)
+    end
+    pcall(function()
+      card.setStrokeWidth(theme.dp(selected and 2 or 1))
+      card.setStrokeColor(theme.normalize(
+        selected and colors.primary or colors.outlineVariant))
+    end)
+  end
+
+  return card, setSelected
 end
 
 function M.create()
@@ -115,6 +164,8 @@ function M.create()
     loading = false,
     loaded = false,
     error = nil,
+    -- 多选状态：map 以作业真实 id 为键，items 保持选择顺序
+    selection = { active = false, map = {}, items = {} },
   }
 
   local shell = kit.scrollPage({
@@ -228,7 +279,54 @@ function M.create()
   -- 列表区容器
   local body = kit.column({}, { width = "match" })
 
+  -- ===== 多选工具栏（默认隐藏，进入多选模式后显示）=====
+  local selectionCountLabel = kit.text("已选 0 / " .. config.HOMEWORK_BATCH_MAX, {
+    size = kit.TYPOGRAPHY.title,
+    color = colors.onSurface,
+    bold = true,
+  })
+  local selectionHint = kit.text(
+    string.format("点击作业卡片切换选中状态，最多 %d 个作业", config.HOMEWORK_BATCH_MAX), {
+      size = kit.TYPOGRAPHY.label,
+      color = colors.onSurfaceVariant,
+      maxLines = 2,
+    })
+  local startBatchButton = kit.button("开始批量操作", {
+    width = "match",
+    height = "44dp",
+    iconName = "done_all",
+    onClick = function() page.startBatch() end,
+  })
+  local selectionBar = kit.card({
+    kit.row({
+      selectionCountLabel,
+      kit.column({}, { width = "0dp", weight = 1 }),
+      kit.button("全选", {
+        style = "outlined",
+        height = "38dp",
+        size = kit.TYPOGRAPHY.label,
+        onClick = function() page.selectAll() end,
+      }),
+      kit.hSpacer(6),
+      kit.button("清空", {
+        style = "outlined",
+        height = "38dp",
+        size = kit.TYPOGRAPHY.label,
+        onClick = function() page.clearSelection() end,
+      }),
+    }, { width = "match" }),
+    kit.spacer(6),
+    selectionHint,
+    kit.spacer(10),
+    startBatchButton,
+  }, {
+    marginHorizontal = kit.SPACING.pageHorizontal,
+    padding = kit.SPACING.cardPadding,
+  })
+  selectionBar.setVisibility(8)
+
   shell.add(kit.pageHeader("作业", nil, {
+    kit.iconButton("done_all", { onClick = function() page.toggleSelectionMode() end }),
     kit.iconButton("refresh", { onClick = function() page.reload() end }),
   }))
   shell.add(kit.row({
@@ -250,6 +348,7 @@ function M.create()
     }, { width = "match" }),
   }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
   shell.add(kit.spacer(kit.SPACING.cardGap))
+  shell.add(selectionBar)
   shell.add(filterScroll)
   shell.add(kit.spacer(4))
   shell.add(body)
@@ -264,6 +363,8 @@ function M.create()
   local footerView = nil
   -- 状态占位（加载中 / 空态 / 错误）的引用，切回列表时必须显式移除
   local statusView = nil
+  -- 多选模式下每张卡片的选中态更新器（key → setSelected）
+  local cardSelectors = {}
 
   local function openCard(item)
     local detail = require "app.ui.pages.homework_detail"
@@ -279,6 +380,7 @@ function M.create()
     footerView = nil
     footerKey = nil
     statusView = nil
+    cardSelectors = {}
   end
 
   local function buildFooter()
@@ -374,8 +476,16 @@ function M.create()
     -- 列表被替换（数量减少）时无法安全增量追加，回退到整块重建
     if #cardViews > #page.list then clearBody() end
     for index = #cardViews + 1, #page.list do
-      local view = buildCard(page.list[index], colors, openCard)
+      local item = page.list[index]
+      local key = selectionKey(item)
+      local view, setSelected = buildCard(item, colors, {
+        onOpen = openCard,
+        onToggle = function() page.toggleSelect(item) end,
+        selectionActive = page.selection.active,
+        selected = page.selection.map[key] == true,
+      })
       cardViews[index] = view
+      if setSelected ~= nil then cardSelectors[key] = setSelected end
       body.addView(view)
     end
     applyFooter()
@@ -384,6 +494,138 @@ function M.create()
   function page.render()
     updateSummary()
     renderBody()
+  end
+
+  -- ===== 多选模式 =====
+  function page.updateSelectionBar()
+    local count = #page.selection.items
+    selectionCountLabel.setText(string.format("已选 %d / %d", count, config.HOMEWORK_BATCH_MAX))
+    selectionBar.setVisibility(page.selection.active and 0 or 8)
+    startBatchButton.setEnabled(count > 0)
+  end
+
+  local function rebuildList()
+    clearBody()
+    renderBody()
+  end
+
+  function page.toggleSelectionMode(force)
+    local active = force
+    if active == nil then active = not page.selection.active end
+    if active == page.selection.active then return end
+    page.selection.active = active
+    if not active then
+      page.selection.map = {}
+      page.selection.items = {}
+    end
+    page.updateSelectionBar()
+    rebuildList()
+  end
+
+  function page.toggleSelect(item, silent)
+    if not page.selection.active then return end
+    local key = selectionKey(item)
+
+    if page.selection.map[key] == true then
+      page.selection.map[key] = nil
+      for index, entry in ipairs(page.selection.items) do
+        if entry.key == key then
+          table.remove(page.selection.items, index)
+          break
+        end
+      end
+      local setSelected = cardSelectors[key]
+      if setSelected ~= nil then setSelected(false) end
+    else
+      if #page.selection.items >= config.HOMEWORK_BATCH_MAX then
+        if not silent then
+          dialogs.snackbar(string.format("最多只能选择 %d 个作业",
+            config.HOMEWORK_BATCH_MAX))
+        end
+        return
+      end
+      page.selection.map[key] = true
+      page.selection.items[#page.selection.items + 1] = {
+        key = key,
+        id = item.id,
+        name = item.name,
+      }
+      local setSelected = cardSelectors[key]
+      if setSelected ~= nil then setSelected(true) end
+    end
+
+    page.updateSelectionBar()
+  end
+
+  -- 全选当前已加载作业（到达上限即停止，不累计跨页的历史选择）
+  function page.selectAll()
+    local added = 0
+    local limitHit = false
+    for _, item in ipairs(page.list) do
+      if #page.selection.items >= config.HOMEWORK_BATCH_MAX then
+        limitHit = true
+        break
+      end
+      if page.selection.map[selectionKey(item)] == nil then
+        page.toggleSelect(item, true)
+        added = added + 1
+      end
+    end
+    page.updateSelectionBar()
+    if limitHit then
+      dialogs.snackbar(string.format("已选满 %d 个作业，其余未选中",
+        config.HOMEWORK_BATCH_MAX))
+    elseif added == 0 then
+      dialogs.snackbar("当前已加载的作业已全部选中")
+    end
+  end
+
+  function page.clearSelection()
+    if #page.selection.items == 0 then return end
+    for _, entry in ipairs(page.selection.items) do
+      local setSelected = cardSelectors[entry.key]
+      if setSelected ~= nil then setSelected(false) end
+    end
+    page.selection.map = {}
+    page.selection.items = {}
+    page.updateSelectionBar()
+  end
+
+  function page.startBatch()
+    local count = #page.selection.items
+    if count == 0 then
+      dialogs.snackbar("请先选择要批量操作的作业")
+      return
+    end
+
+    dialogs.confirm({
+      title = "批量自动操作",
+      message = string.format(
+        "将自动获取 %d 个作业的详情，跳过语音练习与已达标练习，"
+        .. "并以排行榜第 1 名耗时 + 随机 %d~%d 秒提交其余练习；"
+        .. "每份作业完成后等待 %d~%d 秒再继续下一份。\n\n"
+        .. "执行过程可在进度页随时取消。", count,
+        config.SPEND_TIME_JITTER_MIN, config.SPEND_TIME_JITTER_MAX,
+        math.floor(config.HOMEWORK_GAP_MIN_MS / 1000), math.floor(config.HOMEWORK_GAP_MAX_MS / 1000)),
+      positiveLabel = "开始执行",
+      onConfirm = function()
+        local homeworks = {}
+        for index, entry in ipairs(page.selection.items) do
+          homeworks[index] = { id = entry.id, name = entry.name }
+        end
+        local batchPage = require("app.ui.pages.homework_batch").create({
+          title = "批量操作",
+          homeworks = homeworks,
+          onFinished = function()
+            page.clearSelection()
+            page.toggleSelectionMode(false)
+            page.reload()
+          end,
+        })
+        page.toggleSelectionMode(false)
+        require("app.router").push(batchPage)
+      end,
+    })
   end
 
   function page.load(reset)

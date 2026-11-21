@@ -1,7 +1,10 @@
--- 作业详情页：概览信息、练习列表、练习操作入口、分享图片。
+-- 作业详情页：概览信息、「一键完成」入口、练习列表、练习操作入口、分享图片。
+-- 「一键完成」把整个作业交给 app/services/homework_batch.lua 串行自动处理，
+-- 进度与结果在 app/ui/pages/homework_batch.lua 中展示。
 
 local kit = require "app.ui.kit"
 local theme = require "app.ui.theme"
+local config = require "app.config"
 local dialogs = require "app.ui.dialogs"
 local router = require "app.router"
 local homeworkService = require "app.services.homework"
@@ -252,9 +255,28 @@ function M.create(homework)
       }, { width = "match" }),
     }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
 
-    shell.add(kit.sectionTitle("练习列表", "分享作业", function()
-      page.share()
-    end))
+    shell.add(kit.row({
+      kit.button("一键完成", {
+        height = "44dp",
+        iconName = "done_all",
+        onClick = function() page.oneClick() end,
+      }),
+      kit.hSpacer(8),
+      kit.button("分享作业", {
+        style = "outlined",
+        height = "44dp",
+        iconName = "share",
+        onClick = function() page.share() end,
+      }),
+      kit.column({}, { width = "0dp", weight = 1 }),
+    }, {
+      width = "match",
+      paddingStart = kit.SPACING.pageHorizontal,
+      paddingEnd = kit.SPACING.pageHorizontal,
+      paddingTop = kit.SPACING.cardGap,
+    }))
+
+    shell.add(kit.sectionTitle("练习列表"))
 
     if #practices == 0 then
       shell.add(kit.stateView({
@@ -284,15 +306,67 @@ function M.create(homework)
 
     shell.add(kit.spacer(16))
     shell.add(kit.text(
-      "提示：练习完成记录只会按你输入的实际情况提交，应用不会代替你答题，也不会生成虚假成绩。",
+      "「一键完成」会自动查询每个练习的排行榜，跳过语音练习与已达标练习，"
+      .. string.format(
+        "并以排行榜第 1 名耗时 + 随机 %d~%d 秒作为提交参考值；不修改成绩与准确率。",
+        config.SPEND_TIME_JITTER_MIN, config.SPEND_TIME_JITTER_MAX),
       {
         size = kit.TYPOGRAPHY.label,
         color = colors.outline,
-        maxLines = 5,
+        maxLines = 6,
         marginStart = kit.SPACING.pageHorizontal,
         marginEnd = kit.SPACING.pageHorizontal,
       }))
     shell.add(kit.spacer(24))
+  end
+
+  -- 一键完成：整体确认一次后自动执行全部练习，进度与结果在批量操作页展示。
+  function page.oneClick()
+    local detail = page.detail
+    if detail == nil then
+      dialogs.snackbar("作业详情尚未加载完成")
+      return
+    end
+    local practices = detail.testbanks or {}
+    if #practices == 0 then
+      dialogs.snackbar("该作业没有练习项")
+      return
+    end
+
+    local voiceCount = 0
+    for _, practice in ipairs(practices) do
+      if homeworkService.isVoicePractice(practice) then
+        voiceCount = voiceCount + 1
+      end
+    end
+    local autoCount = #practices - voiceCount
+    if autoCount == 0 then
+      dialogs.alert("无法一键完成",
+        "该作业只包含语音练习，语音练习需要在网页端完成，本版本会自动跳过。")
+      return
+    end
+
+    local name = tostring(detail.name or homework.name or "作业")
+    dialogs.confirm({
+      title = "一键完成作业",
+      message = string.format(
+        "「%s」共 %d 个练习，其中语音练习 %d 个会自动跳过。\n\n"
+        .. "其余练习将自动查询排行榜：已达标（达标模式 100%%、普通模式 80%%，"
+        .. "按 self.is_answered 与 accuracy 判断）的直接跳过；未达标的以排行榜第 1 名耗时"
+        .. " + 随机 %d~%d 秒作为提交耗时。\n\n"
+        .. "执行过程可在进度页随时取消。",
+        name, #practices, voiceCount,
+        config.SPEND_TIME_JITTER_MIN, config.SPEND_TIME_JITTER_MAX),
+      positiveLabel = "开始执行",
+      onConfirm = function()
+        local batchPage = require("app.ui.pages.homework_batch").create({
+          title = "一键完成",
+          homeworks = { { id = detail.id or homework.id, name = name } },
+          onFinished = function() page.load() end,
+        })
+        router.push(batchPage)
+      end,
+    })
   end
 
   function page.share()

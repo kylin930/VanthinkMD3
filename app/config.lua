@@ -31,6 +31,26 @@ M.THIRD_PARTY = {
 M.PAGE_SIZE = 20
 M.NOTICE_PAGE_SIZE = 20
 
+-- 作业批量自动操作（与原 Web 版一致的上限）
+M.HOMEWORK_BATCH_MAX = 30
+
+-- 提交耗时的允许区间（秒）：排行榜参考值与人工录入都走同一校验
+M.SPEND_TIME_MIN = 1
+M.SPEND_TIME_MAX = 86400
+
+-- 自动操作的参考耗时 = 排行榜第 1 名耗时 + 随机 2~4 秒
+M.SPEND_TIME_JITTER_MIN = 2
+M.SPEND_TIME_JITTER_MAX = 4
+
+-- 一份作业处理完成后、切换到下一份作业前的随机等待（毫秒）。
+-- 只按作业间隔，练习项之间不等待。
+M.HOMEWORK_GAP_MIN_MS = 3000
+M.HOMEWORK_GAP_MAX_MS = 6000
+
+-- 达标判定的正确率阈值：达标模式要求 100，普通模式要求 80
+M.ACCURACY_STANDARD = 100
+M.ACCURACY_NORMAL = 80
+
 -- 作业列表筛选（与原项目 index.html 中的分段按钮一致）
 M.TIME_FILTERS = {
   { key = "all", label = "全部" },
@@ -69,7 +89,7 @@ M.THEME_MODE = {
   DARK = "dark",
 }
 
-M.APP_VERSION = "0.2.3"
+M.APP_VERSION = "0.2.4"
 M.APP_NAME = "VanthinkMD3"
 
 -- 主题种子的可选方式：system（跟随壁纸，仅 Android 12+）、seed（自定义种子色）

@@ -1,0 +1,110 @@
+=== A. 纯逻辑校验 ===
+PASS  parseSeconds m:ss  [95]
+PASS  parseSeconds mm:ss  [95]
+PASS  parseSeconds h:mm:ss
+PASS  parseSeconds 纯秒数
+PASS  parseSeconds 空串返回 nil
+PASS  parseSeconds 0 返回 nil
+PASS  parseSeconds 非法文本返回 nil
+PASS  parseSeconds nil 返回 nil
+PASS  达标模式阈值 100
+PASS  普通模式阈值 80
+PASS  达标模式 100% 视为完成
+PASS  达标模式 99% 不算完成
+PASS  普通模式 80% 视为完成
+PASS  普通模式 79% 不算完成
+PASS  未作答不算完成
+PASS  缺少 self 不算完成
+PASS  语音练习：单词跟读
+PASS  语音练习：朗读课文
+PASS  非语音：阅读理解
+PASS  非语音：判断题
+PASS  第 1 名耗时被采用  [60]
+PASS  参考来源记录第 1 名昵称
+PASS  只有 1 条记录时仍可取参考值  [60]
+PASS  空排行榜没有参考值  [排行榜第 1 名不存在]
+PASS  缺失原因可读
+PASS  第 1 名耗时缺失时没有参考值  [排行榜第 1 名耗时无效]
+PASS  超出 86400 秒的耗时被拒绝  [排行榜第 1 名耗时超出允许范围（90000 秒）]
+PASS  耗时 0 秒被拒绝  [true]
+PASS  耗时超过 86400 秒被拒绝  [true]
+VanthinkMD3 v0.2.4 批量操作测试
+版本常量：0.2.4
+
+=== B1. 批量引擎：正常流程 ===
+PASS  批量任务执行完成
+PASS  作业总数 2  [2]
+PASS  练习总数 8  [8]
+PASS  待处理队列 6（排除 2 个语音练习）  [6]
+PASS  语音跳过 2  [2]
+PASS  已完成跳过 2  [2]
+PASS  无有效耗时 1  [1]
+PASS  提交成功 2  [2]
+PASS  提交失败 1  [1]
+PASS  语音练习没有发起排行榜请求
+PASS  提交使用第 1 名耗时 80 秒  [80]
+PASS  没有排行榜记录时不提交  [nil]
+PASS  同名练习按真实 ID 分别提交  [hw1:1003=1 hw2:2003=1]
+PASS  没有重复提交
+PASS  失败项保存了原因  [服务端拒绝提交]
+
+=== B2. 排行榜超时后重试 ===
+PASS  重试后任务完成
+PASS  排行榜请求被重试一次  [2]
+PASS  重试成功后提交成功  [1]
+PASS  重试成功不计入无有效耗时  [0]
+
+=== B3. 排行榜持续失败 ===
+PASS  持续失败后任务仍正常结束
+PASS  记为无有效排行榜数据  [1]
+PASS  不产生提交或失败计数
+PASS  失败原因已记录  [排行榜查询失败：请求超时，请稍后重试]
+
+=== B4. 提交超时后复核服务端状态 ===
+PASS  超时后复核：任务完成
+PASS  复核为已完成时按成功计  [1]
+PASS  未记为提交失败  [0]
+PASS  结果注明服务端已完成  [请求异常，但服务端已完成]
+
+=== B5. 取消任务 ===
+PASS  取消后任务结束
+PASS  阶段标记为已取消  [cancelled]
+PASS  未执行的队列项被标记取消  [4]
+PASS  取消不会把已发出的请求记为失败
+
+=== C1. 作业首页多选（30 上限 / 全选 / 清空） ===
+PASS  作业列表加载 35 条  [35]
+PASS  进入多选模式
+PASS  全选上限为 30  [30]
+PASS  选满后继续选择被拒绝  [30]
+PASS  清空选择
+PASS  单张卡片可选中
+PASS  退出多选清空选择
+
+=== C2. 批量操作页进度与结果 ===
+PASS  批量页任务回调触发
+PASS  批量页统计：成功 1  [1]
+PASS  批量页统计：语音跳过 1
+PASS  批量页统计：已完成跳过 1
+PASS  页面显示任务完成摘要
+PASS  页面显示成功计数
+PASS  页面显示语音跳过
+PASS  页面显示结果条目
+
+=== C3. 作业详情「一键完成」入口 ===
+PASS  作业详情加载完成
+PASS  详情页存在「一键完成」按钮
+PASS  详情页说明使用排行榜第 1 名耗时
+PASS  详情页不再声称不会代替用户操作
+
+=== C4. 关于页项目来源与致谢 ===
+PASS  关于页含项目来源章节
+PASS  关于页提及 VanthinkWebMDUI2
+PASS  关于页说明 MDUI2 早期实现
+PASS  关于页说明原生重构
+PASS  关于页致谢 NeLuaJ+ / AndroidX / Material
+PASS  关于页未把 Web 版描述为第三方贡献者
+PASS  关于页未声明许可证
+
+=== 汇总：PASS 86 / FAIL 0 ===
+结论：v0.2.4 批量操作检查全部通过

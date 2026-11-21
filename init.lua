@@ -1,7 +1,7 @@
 app_name = "VanthinkMD3"
 package_name = "com.xiaolin.vanthink"
-ver_name = "0.2.3"
-ver_code = "203"
+ver_name = "0.2.4"
+ver_code = "204"
 min_sdk = "26"
 target_sdk = "33"
 -- 发布构建：关闭 debug 标志，避免暴露调试能力

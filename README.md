@@ -31,11 +31,27 @@
 ### 练习与成绩
 
 - 排行榜：按练习项查看班级排行（昵称、正确率、耗时），并显示自己是否已完成。
-- 记录练习完成：由用户输入**真实练习耗时**后二次确认提交，提交前明确说明用途。
+- 记录练习完成：单个练习的手动入口，由用户输入**真实练习耗时**后二次确认提交。
+- 一键完成（作业详情页）：确认一次后自动处理该作业的全部练习，无需逐题填写或逐项确认。
+- 批量操作（作业首页）：多选最多 **30 个**作业后统一自动执行，卡片显示选中态、支持全选与清空。
 
-> 原 Web 版的「一键完成 / 多选批量执行」会用随机耗时伪造完成记录（第一名耗时 +1~5 秒随机偏移、
-> 3~6 秒随机等待伪装真人）。该实现会污染他人可见的排行榜数据，**本版本不再提供**，
-> 只保留合规的真实提交入口。详见 `docs/MIGRATION.md`。
+自动操作流程（`app/services/homework_batch.lua`）：
+
+1. 自动获取选中作业的详情，汇总全部练习；
+2. 自动跳过语音练习（名称含「读」但名称不等于「阅读理解」）；
+3. 查询各练习排行榜，读取自己的完成状态（`self.is_answered` + `self.accuracy`）；
+4. 已达到目标的练习自动跳过（达标模式 100、普通模式 80）；
+5. 取**排行榜第 1 名的有效耗时**作为 `spend_time`，校验范围 1～86400 秒；
+6. 串行调用 `submitCompletion()` 提交，单项失败不影响其他项；
+7. 自动统计成功 / 失败 / 语音跳过 / 已完成跳过 / 无有效排行榜数据，并生成结果列表。
+
+约束：
+
+- 不使用随机数生成或偏移耗时，不添加伪装真人的等待；
+- 第 1 名数据缺失、无效或接口异常时记录该项无法处理的原因，**不擅自生成耗时**；
+- 请求超时/连接失败后先重新查询服务端状态再判定，避免把已落库的提交误报为失败；
+- 支持取消尚未执行的队列项目，已发出的请求按其真实结果记账；
+- `scores=0`、`correct_rate=0`、`wrong_exercises=[]` 严格沿用服务端 `saveScore` 的数据结构。
 
 ### 通知中心
 
@@ -128,8 +144,8 @@
 ```lua
 app_name = "VanthinkMD3"
 package_name = "com.xiaolin.vanthink"
-ver_name = "0.2.3"
-ver_code = "203"
+ver_name = "0.2.4"
+ver_code = "204"
 min_sdk = "26"
 target_sdk = "33"
 debug_mode = false
@@ -230,7 +246,8 @@ UI 回归诊断：运行 `tools/ui_regression.lua` 会真实测量各页面的 V
 1. **未用真实账号验证完整业务流程**。开发环境没有有效学生账号，因此登录成功后的作业列表、通知、统计等数据链路只验证了「接口可达 + 鉴权生效 + 错误码解析」以及桩数据下的 UI 尺寸断言，未验证真实数据渲染。详见 `docs/TEST_REPORT.md`。
 2. **不支持摄像头扫码**。运行时无可用二维码解码库；Auth 迁移接收端改为粘贴链接。
 3. **语音练习未实现**。原项目该功能本身不可用（脚本从未加载、依赖 3 个非官方服务、存在字段级 bug），本版本仅保留业务识别与提示，未引入录音 / ASR / OSS 依赖。详见 `docs/UNIMPLEMENTED.md`。
-4. **批量自动做题已移除**。原因见 `docs/MIGRATION.md` 的合规性说明。
+4. **批量自动操作要求排行榜存在第 1 名记录**。完全没有人完成过的练习没有可用参考耗时，
+   会被记为「无有效耗时」并跳过，不做默认值补位。
 5. **Auth 迁移与更新日志依赖第三方域名**，可用性不受本应用控制；这两项均为可选能力。
 6. **登录态失效依赖服务端返回 `errcode: 44`**，没有 refresh token 机制（官方接口未提供），失效后需重新登录。
 7. 深色模式首次切换会重建 Activity（Material 主题机制决定），属预期行为。
@@ -249,7 +266,7 @@ VanthinkMD3/
 │   ├── config.lua            接口地址、分页与筛选常量、主题预设
 │   ├── state.lua             登录态、账号缓存、未读数
 │   ├── router.lua            底部导航与二级页压栈
-│   ├── services/             auth / homework / notice / statistics / share / update / transfer / http
+│   ├── services/             auth / homework / homework_batch / notice / statistics / share / update / transfer / http
 │   ├── storage/              secure（Keystore 加密）/ preferences（SharedPreferences）
 │   ├── ui/
 │   │   ├── theme.lua         颜色角色、单位、深浅色、种子色
@@ -259,14 +276,15 @@ VanthinkMD3/
 │   │   ├── chart.lua         Canvas 图表（柱状/折线/进度环/二维码渲染）
 │   │   ├── dialogs.lua       Material 对话框与 Snackbar
 │   │   ├── shell.lua         登录页 ↔ 主界面切换、Insets、返回键
-│   │   └── pages/            login / homework / homework_detail / practice / notifications
-│   │                         statistics / profile / theme_settings / changelog / about
-│   │                         security / transfer
+│   │   └── pages/            login / homework / homework_detail / homework_batch / practice
+│   │                         notifications / statistics / profile / theme_settings
+│   │                         changelog / about / security / transfer
 │   └── utils/                formatter / validator / logger / qrcode
 ├── res/string/               字符串资源（app_title）
 ├── docs/                     交付文档
 ├── tools/                    开发期验证脚本（不参与运行，不随打包产物发布）
-│   └── ui_regression.lua     UI 回归诊断：真实测量 View，含 v0.2.3 图标/边距/转场断言
+│   ├── ui_regression.lua     UI 回归诊断：真实测量 View，含 v0.2.3 图标/边距/转场断言
+│   └── test_batch_v024.lua   v0.2.4 批量操作检查：耗时解析 / 完成判定 / 批量引擎 / 多选上限 / 文案
 └── html/                     原 Web 版源码（仅作迁移参考，不参与构建）
 ```
 
@@ -280,8 +298,9 @@ VanthinkMD3/
 | `docs/ARCHITECTURE.md` | 分层架构、渲染策略、异步模型、关键设计决策 |
 | `docs/MIGRATION.md` | 原项目功能迁移对照表、合规性修改说明 |
 | `docs/SECURITY_AUDIT.md` | 安全审计：凭据存储、第三方风险、原项目遗留问题 |
-| `docs/TEST_REPORT.md` | v0.2.2 测试与验收报告（实测尺寸证据与未验证项） |
+| `docs/TEST_REPORT.md` | 测试与验收报告索引（v0.2.2 基线 + v0.2.4 批量操作结论） |
 | `docs/FIX_REPORT_v0.2.2.md` | v0.2.2 UI 渲染与布局修复记录（中文根因分析与改动清单） |
 | `docs/FIX_REPORT_v0.2.3.md` | v0.2.3 UI 精修与 Material Motion 变更日志 + UI 回归结果 + 动画类兼容性检查 |
+| `docs/BATCH_REPORT_v0.2.4.md` | v0.2.4 自动操作恢复说明、批量操作测试报告（PASS 85 / FAIL 0）与关于页修订说明 |
 | `docs/UNIMPLEMENTED.md` | 暂未实现功能清单与后续扩展方案 |
 | `docs/LEGACY_ANALYSIS.md` | 原 Web 项目源码分析（重构依据） |

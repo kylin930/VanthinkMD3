@@ -110,6 +110,41 @@ function M.parseDuration(text)
   return tonumber(m) * 60 + tonumber(s)
 end
 
+-- 严格解析耗时："m:ss" / "mm:ss" / "h:mm:ss" / 纯秒数。
+-- 与 parseDuration 的区别：无法解析、字段缺失、非正数一律返回 nil，
+-- 调用方必须显式处理“没有有效耗时”，不得用默认值补位。
+function M.parseSeconds(value)
+  if type(value) == "number" then
+    if value <= 0 or value ~= math.floor(value) then return nil end
+    return value
+  end
+  if type(value) ~= "string" then return nil end
+  local text = string.match(value, "^%s*(.-)%s*$") or ""
+  if text == "" then return nil end
+  local h, m, s = string.match(text, "^(%d+):(%d+):(%d+)$")
+  if h ~= nil then
+    local total = tonumber(h) * 3600 + tonumber(m) * 60 + tonumber(s)
+    if total <= 0 then return nil end
+    return total
+  end
+  m, s = string.match(text, "^(%d+):(%d+)$")
+  if m ~= nil then
+    local total = tonumber(m) * 60 + tonumber(s)
+    if total <= 0 then return nil end
+    return total
+  end
+  local number = tonumber(text)
+  if number == nil or number <= 0 or number ~= math.floor(number) then return nil end
+  return number
+end
+
+-- 把秒数格式化为 "HH:MM:SS"（与 saveScore 的 spend_time 字段一致）
+function M.spendTime(seconds)
+  local total = math.max(0, math.floor(tonumber(seconds) or 0))
+  return string.format("%02d:%02d:%02d",
+    math.floor(total / 3600), math.floor((total % 3600) / 60), total % 60)
+end
+
 function M.percent(value)
   local number = tonumber(value)
   if number == nil then return "0%" end

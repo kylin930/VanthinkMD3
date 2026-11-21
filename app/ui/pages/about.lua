@@ -45,6 +45,35 @@ function M.create()
       { size = kit.TYPOGRAPHY.body, color = colors.onSurface, width = "match" }),
   }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
 
+  shell.add(kit.sectionTitle("项目来源"))
+  shell.add(kit.card({
+    kit.text("VanthinkWebMDUI2", {
+      size = kit.TYPOGRAPHY.body,
+      color = colors.onSurface,
+      bold = true,
+    }),
+    kit.spacer(4),
+    kit.text(
+      "项目的早期 Web 实现，使用 MDUI2 构建，完成了核心业务功能与交互设计。",
+      { size = kit.TYPOGRAPHY.label, color = colors.onSurfaceVariant, width = "match" }),
+    kit.spacer(12),
+    kit.text("VanthinkMD3", {
+      size = kit.TYPOGRAPHY.body,
+      color = colors.onSurface,
+      bold = true,
+    }),
+    kit.spacer(4),
+    kit.text(
+      "面向 Android 平台的原生重构版本，基于 NeLuaJ+ 开发，"
+      .. "采用 Android 原生 View 与 Material Design 3 重新构建界面和应用架构。",
+      { size = kit.TYPOGRAPHY.label, color = colors.onSurfaceVariant, width = "match" }),
+    kit.spacer(12),
+    kit.text(
+      "两个项目属于同一产品的不同技术实现。VanthinkMD3 在继承原有业务经验的基础上，"
+      .. "对技术架构、界面和交互进行了独立重写。",
+      { size = kit.TYPOGRAPHY.label, color = colors.onSurfaceVariant, width = "match" }),
+  }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
+
   shell.add(kit.sectionTitle("数据来源"))
   shell.add(kit.card({
     kit.text("业务数据来自官方接口：", {
@@ -67,9 +96,14 @@ function M.create()
   shell.add(kit.sectionTitle("开源与致谢"))
   shell.add(kit.card({
     kit.text(
-      "感谢原 Web 版本（Vanthink WebMDUI2）提供的功能原型。"
-      .. "本应用为独立重写实现，采用 Material Design 3 设计语言重新设计了信息架构与交互。",
+      "感谢 NeLuaJ+、AndroidX、Material Components for Android 等实际使用的开源项目及开发社区。",
       { size = kit.TYPOGRAPHY.body, color = colors.onSurface, width = "match" }),
+    kit.spacer(10),
+    kit.text(
+      "其中 NeLuaJ+ 提供 Lua 运行时与打包能力，AndroidX 提供 Activity、Insets、"
+      .. "下拉刷新与滚动容器，Material Components for Android 提供 MD3 组件与转场动画，"
+      .. "网络请求使用运行时内置的 OkHttp。",
+      { size = kit.TYPOGRAPHY.label, color = colors.onSurfaceVariant, width = "match" }),
   }, { marginHorizontal = kit.SPACING.pageHorizontal, padding = kit.SPACING.cardPadding }))
 
   shell.add(kit.spacer(24))
